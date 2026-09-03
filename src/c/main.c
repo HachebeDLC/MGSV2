@@ -27,9 +27,9 @@
 // Nothing may extend past the LCD window or it lands on the printed bezel
 // labels (CHA / ALM / DATA / PWR.S / IMP.L / BATTY) on the right rail.
 //
-// Fields are placed around the printed emblem, Seiko-style:
-//   seconds above it, AM/PM left of it, day-of-week right of it,
-//   HH:MM below it, full date in the lower band.
+// Fields follow the real Seiko WIRED layout:
+//   LCD    : seconds above the emblem, AM/PM to its left, HH:MM below it
+//   band   : month large on the left, day-of-week above day-of-month right
 // ---------------------------------------------------------------------------
 #define LCD_X          11
 #define LCD_Y          17
@@ -52,27 +52,38 @@
 #define LY_SEC_W       84
 #define LY_SEC_H       28
 
-// AM/PM and day-of-week flank the printed emblem (x 48..70, y 53..76), filling
-// the gaps between it and the sweep marks (which reach x 15 and x 101).
-// Their height must clear the label font or the glyphs get clipped.
+// AM/PM sits left of the printed emblem (x 48..70, y 53..76), in the gap
+// between it and the sweep marks (which reach x 15). Its height must clear
+// the label font or the glyphs get clipped. Nothing goes to the emblem's
+// right: on the real watch that side of the LCD is empty, the CHA/DATA/TMR/
+// ALM/TIME rail being outside the glass.
 #define LY_AMPM_X      17
 #define LY_AMPM_Y      52
 #define LY_AMPM_W      29
 #define LY_AMPM_H      25
 
-#define LY_DOW_X       72
-#define LY_DOW_Y       52
-#define LY_DOW_W       26
-#define LY_DOW_H       25
+// Lower band, laid out like the real watch: month large on the left, then
+// day-of-week stacked above day-of-month on the right ("DEC" / "MO" / "6").
+// The white area starts higher on the right (y 116 from x 107, vs y 122
+// across the full width), which is what makes room for the stack.
+#define LY_DOW_X       104
+#define LY_DOW_Y       112
+#define LY_DOW_W       34
+#define LY_DOW_H       16
+
+#define LY_DOM_X       98
+#define LY_DOM_Y       125
+#define LY_DOM_W       40
+#define LY_DOM_H       30
 
 #define LY_TIME_X      18
 #define LY_TIME_Y      77
 #define LY_TIME_W      80
 #define LY_TIME_H      28
 
-#define LY_DATE_X      4
+#define LY_DATE_X      6
 #define LY_DATE_Y      122
-#define LY_DATE_W      136
+#define LY_DATE_W      86
 #define LY_DATE_H      31
 
 #define LY_WEATHER_X   6
@@ -116,6 +127,7 @@ static GRect s_bounds;
 
 static TextLayer *s_time_layer;
 static TextLayer *s_sec_layer;
+static TextLayer *s_dom_layer;
 static TextLayer *s_am_pm_layer;
 static TextLayer *s_date_layer;
 static TextLayer *s_weekday_text_layer;
@@ -354,9 +366,9 @@ static void update_time(void) {
   }
   text_layer_set_text(s_sec_layer, sec_buffer);
 
-  // Date in the lower band: uppercase month + day-of-month, "SEP 03".
-  // No year - neither the Seiko watch nor the in-game HUD shows one; the
-  // original project's "%Y %h %d" was its own invention (and never ran).
+  // Lower band, as on the real watch: month large on the left, day-of-week
+  // above day-of-month on the right. No year - neither the Seiko nor the
+  // in-game HUD shows one.
   static char mon_buffer[6];
   strftime(mon_buffer, sizeof(mon_buffer), "%b", tick_time);
   for (char *p = mon_buffer; *p; p++) {
@@ -364,9 +376,12 @@ static void update_time(void) {
       *p = (char)(*p - ('a' - 'A'));
     }
   }
-  static char date_buffer[16];
-  snprintf(date_buffer, sizeof(date_buffer), "%s %02d", mon_buffer, tick_time->tm_mday);
-  text_layer_set_text(s_date_layer, date_buffer);
+  text_layer_set_text(s_date_layer, mon_buffer);
+
+  // Day-of-month, right of the month in the lower band (the "6" on the watch).
+  static char dom_buffer[3];
+  strftime(dom_buffer, sizeof(dom_buffer), "%d", tick_time);
+  text_layer_set_text(s_dom_layer, dom_buffer);
 
   // Day-of-week straight from tm_wday (0=Sunday). Deriving it via strftime
   // "%u" needed a 2-byte buffer with no slack; on a short write the label
@@ -451,16 +466,24 @@ static void main_window_load(Window *window) {
   text_layer_set_background_color(s_date_layer, GColorClear);
   text_layer_set_text_color(s_date_layer, GColorBlack);
   text_layer_set_font(s_date_layer, s_time_font);
-  text_layer_set_text_alignment(s_date_layer, GTextAlignmentCenter);
-  text_layer_set_text(s_date_layer, "SEP 03");
+  text_layer_set_text_alignment(s_date_layer, GTextAlignmentLeft);
+  text_layer_set_text(s_date_layer, "SEP");
 
-  // Day-of-week - small, right of the time
+  // Day-of-week - upper right of the lower band (the "MO" on the watch)
   s_weekday_text_layer = text_layer_create(scaled_rect(LY_DOW_X, LY_DOW_Y, LY_DOW_W, LY_DOW_H));
   text_layer_set_background_color(s_weekday_text_layer, GColorClear);
   text_layer_set_text_color(s_weekday_text_layer, GColorBlack);
-  text_layer_set_font(s_weekday_text_layer, s_label_font);
+  text_layer_set_font(s_weekday_text_layer, s_letter_font);
   text_layer_set_text_alignment(s_weekday_text_layer, GTextAlignmentRight);
   text_layer_set_text(s_weekday_text_layer, "MO");
+
+  // Day-of-month - directly below it (the "6" on the watch)
+  s_dom_layer = text_layer_create(scaled_rect(LY_DOM_X, LY_DOM_Y, LY_DOM_W, LY_DOM_H));
+  text_layer_set_background_color(s_dom_layer, GColorClear);
+  text_layer_set_text_color(s_dom_layer, GColorBlack);
+  text_layer_set_font(s_dom_layer, s_time_mid_font);
+  text_layer_set_text_alignment(s_dom_layer, GTextAlignmentRight);
+  text_layer_set_text(s_dom_layer, "03");
 
   s_weather_layer = text_layer_create(scaled_rect(LY_WEATHER_X, LY_WEATHER_Y, LY_WEATHER_W, LY_WEATHER_H));
   text_layer_set_background_color(s_weather_layer, GColorClear);
@@ -475,6 +498,7 @@ static void main_window_load(Window *window) {
   layer_add_child(s_root_layer, text_layer_get_layer(s_am_pm_layer));
   layer_add_child(s_root_layer, text_layer_get_layer(s_date_layer));
   layer_add_child(s_root_layer, text_layer_get_layer(s_weekday_text_layer));
+  layer_add_child(s_root_layer, text_layer_get_layer(s_dom_layer));
   layer_add_child(s_root_layer, text_layer_get_layer(s_weather_layer));
 
   // Battery meter - by the "BATTY" label on the right rail
@@ -492,6 +516,7 @@ static void main_window_unload(Window *window) {
   text_layer_destroy(s_am_pm_layer);
   text_layer_destroy(s_date_layer);
   text_layer_destroy(s_weekday_text_layer);
+  text_layer_destroy(s_dom_layer);
   text_layer_destroy(s_weather_layer);
 
   fonts_unload_custom_font(s_time_font);
