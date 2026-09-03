@@ -295,24 +295,35 @@ static void battery_update_proc(Layer *layer, GContext *ctx) {
 // --- custom layers --------------------------------------------------
 //
 // The 60 second-marks are spaced evenly ALONG THE PERIMETER of the LCD, not
-// by angle. That is what makes them line up with the printed scale numbers:
+// by angle. That is what lines them up with the printed scale numbers:
 // projecting equal angles onto a rectangle bunches marks near the sides and
-// spreads them at the corners, which is why the ring looked off-centre.
-// Walking the perimeter puts mark 5 under the printed "5", mark 10 under
-// "10", mark 45 under "45", and so on (verified against the artwork).
+// spreads them at the corners. Walking the perimeter puts mark 5 under the
+// printed "5", mark 10 under "10", mark 45 under "45" (checked on the art).
 //
-// Each mark is a short segment perpendicular to its edge, pointing inward.
+// The path is a ROUNDED rectangle, not a sharp one. On a sharp rect the last
+// mark of an edge points inward while the first of the next points sideways,
+// and at the corner the two cross in a plus. Rounding the corners lets the
+// marks pivot gradually, which is also what the real watch does.
+//
+// Each mark is a short segment normal to the path, pointing inward.
 static void hands_update_proc(Layer *layer, GContext *ctx) {
   GRect b = layer_get_bounds(layer);
-  int32_t w = b.size.w;
-  int32_t h = b.size.h;
-  if (w < 16 || h < 16) return;
+  int32_t w = b.size.w - 1;
+  int32_t h = b.size.h - 1;
+  if (w < 24 || h < 24) return;
 
-  int32_t len = (w < h ? w : h) / 14;   // measured off the reference photo
+  int32_t small = w < h ? w : h;
+  int32_t r   = small / 7;    // corner radius, matching the artwork
+  int32_t len = small / 14;   // mark length, measured off the reference photo
   if (len < 3) len = 3;
 
-  int32_t half = w / 2;
-  int32_t perim = 2 * (w + h);
+  // Segment lengths around the path. The quarter arc is pi*r/2, in fixed point.
+  int32_t run_x = w - 2 * r;          // straight run, top and bottom
+  int32_t run_y = h - 2 * r;          // straight run, left and right
+  int32_t arc   = (r * 1571) / 1000;  // pi/2 * r
+  int32_t half  = run_x / 2;          // top centre -> start of the top-right arc
+  int32_t perim = 2 * run_x + 2 * run_y + 4 * arc;
+  const int32_t Q = TRIG_MAX_ANGLE / 4;
 
   time_t now = time(NULL);
   struct tm *t = localtime(&now);
@@ -321,22 +332,41 @@ static void hands_update_proc(Layer *layer, GContext *ctx) {
   // 2px reads as a hairline on emery but is chunky on a 144x168 screen, where
   // it would crowd the time underneath.
   graphics_context_set_stroke_color(ctx, GColorBlack);
-  graphics_context_set_stroke_width(ctx, w >= 120 ? 2 : 1);
+  graphics_context_set_stroke_width(ctx, b.size.w >= 120 ? 2 : 1);
+
   for (int i = 0; i < last; i++) {
-    int32_t d = ((int32_t)i * perim) / 60;   // distance from top-centre, clockwise
+    int32_t d = ((int32_t)i * perim) / 60;   // walked clockwise from top centre
     int32_t ox, oy, ix, iy;
 
-    if (d <= half) {                       // top edge, centre -> right
-      ox = half + d;      oy = 0;          ix = ox;        iy = len;
-    } else if ((d -= half) <= h) {         // right edge, top -> bottom
-      ox = w - 1;         oy = d;          ix = w - 1 - len; iy = oy;
-    } else if ((d -= h) <= w) {            // bottom edge, right -> left
-      ox = w - d;         oy = h - 1;      ix = ox;        iy = h - 1 - len;
-    } else if ((d -= w) <= h) {            // left edge, bottom -> top
-      ox = 0;             oy = h - d;      ix = len;       iy = oy;
-    } else {                               // top edge, left -> centre
-      ox = d - h;         oy = 0;          ix = ox;        iy = len;
+    // On an arc: centre + r outward, centre + (r-len) inward, along the radius.
+    #define ARC_POINT(cx, cy, a) do {                                  \
+      int32_t s_ = sin_lookup(a), c_ = cos_lookup(a);                  \
+      ox = (cx) + (s_ * r) / TRIG_MAX_RATIO;                           \
+      oy = (cy) - (c_ * r) / TRIG_MAX_RATIO;                           \
+      ix = (cx) + (s_ * (r - len)) / TRIG_MAX_RATIO;                   \
+      iy = (cy) - (c_ * (r - len)) / TRIG_MAX_RATIO;                   \
+    } while (0)
+
+    if (d < half) {                                   // top edge, centre -> right
+      ox = w / 2 + d;  oy = 0;      ix = ox;  iy = len;
+    } else if ((d -= half) < arc) {                   // top-right corner
+      ARC_POINT(w - r, r, (d * Q) / arc);
+    } else if ((d -= arc) < run_y) {                  // right edge, down
+      ox = w;  oy = r + d;          ix = w - len;  iy = oy;
+    } else if ((d -= run_y) < arc) {                  // bottom-right corner
+      ARC_POINT(w - r, h - r, Q + (d * Q) / arc);
+    } else if ((d -= arc) < run_x) {                  // bottom edge, right -> left
+      ox = w - r - d;  oy = h;      ix = ox;  iy = h - len;
+    } else if ((d -= run_x) < arc) {                  // bottom-left corner
+      ARC_POINT(r, h - r, 2 * Q + (d * Q) / arc);
+    } else if ((d -= arc) < run_y) {                  // left edge, up
+      ox = 0;  oy = h - r - d;      ix = len;  iy = oy;
+    } else if ((d -= run_y) < arc) {                  // top-left corner
+      ARC_POINT(r, r, 3 * Q + (d * Q) / arc);
+    } else {                                          // top edge, left -> centre
+      ox = r + (d - arc);  oy = 0;  ix = ox;  iy = len;
     }
+    #undef ARC_POINT
 
     graphics_draw_line(ctx, GPoint(ix, iy), GPoint(ox, oy));
   }
