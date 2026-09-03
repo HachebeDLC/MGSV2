@@ -35,10 +35,8 @@
         { "type": "font", "name": "FONT_DIGIT_SEVEN_30", "file": "fonts/digital-7 (italic).ttf" },
         { "type": "font", "name": "FONT_DIGIT_SEVEN_25", "file": "fonts/digital-7 (italic).ttf" },
         { "type": "font", "name": "FONT_SMALL_PIXEL_15", "file": "fonts/5x5 (2).ttf" },
-        { "type": "font", "name": "FONT_DIGIT_SEVEN_18", "file": "fonts/digital-7 (italic).ttf" },
         { "type": "font", "name": "FONT_DIGIT_SEVEN_42", "file": "fonts/digital-7 (italic).ttf", "targetPlatforms": ["emery"] },
         { "type": "font", "name": "FONT_DIGIT_SEVEN_35", "file": "fonts/digital-7 (italic).ttf", "targetPlatforms": ["emery"] },
-        { "type": "font", "name": "FONT_DIGIT_SEVEN_24", "file": "fonts/digital-7 (italic).ttf", "targetPlatforms": ["emery"] },
         { "type": "font", "name": "FONT_SMALL_PIXEL_21", "file": "fonts/5x5 (2).ttf", "targetPlatforms": ["emery"] }
       ]
     }

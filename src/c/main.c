@@ -17,24 +17,59 @@
 #define DESIGN_W 144
 #define DESIGN_H 168
 
-// Weather readout position, in design-canvas coordinates. Tweak here if it
-// overlaps the bezel artwork on your watch.
-#define WEATHER_DX 2
-#define WEATHER_DY 1
-#define WEATHER_DW (DESIGN_W - 4)
-#define WEATHER_DH 12
+// ---------------------------------------------------------------------------
+// Field layout, in 144x168 design-canvas coords (scaled to the real screen at
+// runtime). Positions mirror the Seiko NextAge MGSV watch:
+//   - big running seconds in the top-right of the LCD
+//   - HH:MM centred over the Diamond Dogs emblem
+//   - abbreviated month + day-of-month large, lower-centre (the "DEC" slot)
+//   - small day-of-week in the top-left
+// Tweak these if anything clips or overlaps the printed bezel art.
+// ---------------------------------------------------------------------------
+#define LY_SEC_X       64
+#define LY_SEC_Y       13
+#define LY_SEC_W       44
+#define LY_SEC_H       36
+
+#define LY_DOW_X       10
+#define LY_DOW_Y       14
+#define LY_DOW_W       34
+#define LY_DOW_H       14
+
+#define LY_TIME_X      6
+#define LY_TIME_Y      66
+#define LY_TIME_W      102
+#define LY_TIME_H      48
+
+#define LY_AMPM_X      8
+#define LY_AMPM_Y      56
+#define LY_AMPM_W      20
+#define LY_AMPM_H      12
+
+#define LY_DATE_X      6
+#define LY_DATE_Y      108
+#define LY_DATE_W      104
+#define LY_DATE_H      30
+
+#define LY_WEATHER_X   6
+#define LY_WEATHER_Y   1
+#define LY_WEATHER_W   (DESIGN_W - 12)
+#define LY_WEATHER_H   12
+
+#define LY_BATT_X      118
+#define LY_BATT_Y      76
+#define LY_BATT_W      20
+#define LY_BATT_H      11
 
 // Platform-scaled fonts. The "~emery" project fonts are only bundled for
 // emery (see package.json), so guard their use.
 #if defined(PBL_PLATFORM_EMERY)
   #define RES_FONT_TIME    RESOURCE_ID_FONT_DIGIT_SEVEN_42
   #define RES_FONT_MID     RESOURCE_ID_FONT_DIGIT_SEVEN_35
-  #define RES_FONT_DATE    RESOURCE_ID_FONT_DIGIT_SEVEN_24
   #define RES_FONT_LETTER  RESOURCE_ID_FONT_SMALL_PIXEL_21
 #else
   #define RES_FONT_TIME    RESOURCE_ID_FONT_DIGIT_SEVEN_30
   #define RES_FONT_MID     RESOURCE_ID_FONT_DIGIT_SEVEN_25
-  #define RES_FONT_DATE    RESOURCE_ID_FONT_DIGIT_SEVEN_18
   #define RES_FONT_LETTER  RESOURCE_ID_FONT_SMALL_PIXEL_15
 #endif
 
@@ -72,7 +107,6 @@ static GBitmap *s_diamond_white_bitmap;
 
 static GFont s_time_font;
 static GFont s_time_mid_font;
-static GFont s_date_font;
 static GFont s_letter_font;
 
 static int s_battery_level;
@@ -274,15 +308,22 @@ static void update_time(void) {
   }
   text_layer_set_text(s_am_pm_layer, am_buffer);
 
-  // Day-of-month first so it stays visible even if the line is tight;
-  // 2-digit year keeps the whole string clear of the weekday label.
+  // "DEC 03" style: uppercase abbreviated month + day-of-month, like the
+  // real watch's date field.
+  static char mon_buf[6];
+  strftime(mon_buf, sizeof(mon_buf), "%b", tick_time);
+  for (char *p = mon_buf; *p; p++) {
+    if (*p >= 'a' && *p <= 'z') {
+      *p = (char)(*p - ('a' - 'A'));
+    }
+  }
   static char date_buffer[16];
-  strftime(date_buffer, sizeof(date_buffer), "%d %h %y", tick_time);
+  snprintf(date_buffer, sizeof(date_buffer), "%s %02d", mon_buf, tick_time->tm_mday);
   text_layer_set_text(s_date_layer, date_buffer);
 
   static char weekday_buffer[2];
   strftime(weekday_buffer, sizeof(weekday_buffer), "%u", tick_time);
-  static const char *const day_names[] = { "mo", "tu", "we", "th", "fr", "sa", "su" };
+  static const char *const day_names[] = { "MO", "TU", "WE", "TH", "FR", "SA", "SU" };
   int idx = weekday_buffer[0] - '1';
   if (idx >= 0 && idx < 7) {
     text_layer_set_text(s_weekday_text_layer, day_names[idx]);
@@ -340,50 +381,52 @@ static void main_window_load(Window *window) {
   // Fonts
   s_time_font = fonts_load_custom_font(resource_get_handle(RES_FONT_TIME));
   s_time_mid_font = fonts_load_custom_font(resource_get_handle(RES_FONT_MID));
-  s_date_font = fonts_load_custom_font(resource_get_handle(RES_FONT_DATE));
   s_letter_font = fonts_load_custom_font(resource_get_handle(RES_FONT_LETTER));
 
-  // Text layers - same layout as the original 144x168 face, scaled.
-  s_time_layer = text_layer_create(scaled_rect(34, 70, 150, 50));
+  // HH:MM - centred over the emblem
+  s_time_layer = text_layer_create(scaled_rect(LY_TIME_X, LY_TIME_Y, LY_TIME_W, LY_TIME_H));
   text_layer_set_background_color(s_time_layer, GColorClear);
   text_layer_set_text_color(s_time_layer, GColorBlack);
   text_layer_set_font(s_time_layer, s_time_font);
-  text_layer_set_text_alignment(s_time_layer, GTextAlignmentLeft);
+  text_layer_set_text_alignment(s_time_layer, GTextAlignmentCenter);
   text_layer_set_text(s_time_layer, "00:00");
 
-  s_time_sec_layer = text_layer_create(scaled_rect(65, 22, 150, 40));
+  // Running seconds - big, top-right of the LCD ("42" on the real watch)
+  s_time_sec_layer = text_layer_create(scaled_rect(LY_SEC_X, LY_SEC_Y, LY_SEC_W, LY_SEC_H));
   text_layer_set_background_color(s_time_sec_layer, GColorClear);
   text_layer_set_text_color(s_time_sec_layer, GColorBlack);
   text_layer_set_font(s_time_sec_layer, s_time_mid_font);
-  text_layer_set_text_alignment(s_time_sec_layer, GTextAlignmentLeft);
+  text_layer_set_text_alignment(s_time_sec_layer, GTextAlignmentRight);
   text_layer_set_text(s_time_sec_layer, "00");
 
-  s_am_pm_layer = text_layer_create(scaled_rect(21, 70, 20, 15));
+  s_am_pm_layer = text_layer_create(scaled_rect(LY_AMPM_X, LY_AMPM_Y, LY_AMPM_W, LY_AMPM_H));
   text_layer_set_background_color(s_am_pm_layer, GColorClear);
   text_layer_set_text_color(s_am_pm_layer, GColorBlack);
   text_layer_set_font(s_am_pm_layer, s_letter_font);
   text_layer_set_text_alignment(s_am_pm_layer, GTextAlignmentLeft);
   text_layer_set_text(s_am_pm_layer, "AM");
 
-  s_date_layer = text_layer_create(scaled_rect(7, 120, 140, 30));
+  // Month + day-of-month - large, lower-centre (the "DEC" slot)
+  s_date_layer = text_layer_create(scaled_rect(LY_DATE_X, LY_DATE_Y, LY_DATE_W, LY_DATE_H));
   text_layer_set_background_color(s_date_layer, GColorClear);
   text_layer_set_text_color(s_date_layer, GColorBlack);
-  text_layer_set_font(s_date_layer, s_date_font);
-  text_layer_set_text_alignment(s_date_layer, GTextAlignmentLeft);
-  text_layer_set_text(s_date_layer, "03 sep 26");
+  text_layer_set_font(s_date_layer, s_time_mid_font);
+  text_layer_set_text_alignment(s_date_layer, GTextAlignmentCenter);
+  text_layer_set_text(s_date_layer, "SEP 03");
 
-  s_weekday_text_layer = text_layer_create(scaled_rect(115, 100, 50, 30));
+  // Day-of-week - small, top-left
+  s_weekday_text_layer = text_layer_create(scaled_rect(LY_DOW_X, LY_DOW_Y, LY_DOW_W, LY_DOW_H));
   text_layer_set_background_color(s_weekday_text_layer, GColorClear);
   text_layer_set_text_color(s_weekday_text_layer, GColorBlack);
-  text_layer_set_font(s_weekday_text_layer, s_time_mid_font);
+  text_layer_set_font(s_weekday_text_layer, s_letter_font);
   text_layer_set_text_alignment(s_weekday_text_layer, GTextAlignmentLeft);
-  text_layer_set_text(s_weekday_text_layer, "fr");
+  text_layer_set_text(s_weekday_text_layer, "MO");
 
-  s_weather_layer = text_layer_create(scaled_rect(WEATHER_DX, WEATHER_DY, WEATHER_DW, WEATHER_DH));
+  s_weather_layer = text_layer_create(scaled_rect(LY_WEATHER_X, LY_WEATHER_Y, LY_WEATHER_W, LY_WEATHER_H));
   text_layer_set_background_color(s_weather_layer, GColorClear);
   text_layer_set_text_color(s_weather_layer, GColorWhite);
   text_layer_set_font(s_weather_layer, s_letter_font);
-  text_layer_set_text_alignment(s_weather_layer, GTextAlignmentRight);
+  text_layer_set_text_alignment(s_weather_layer, GTextAlignmentCenter);
   text_layer_set_text(s_weather_layer, "");
   layer_set_hidden(text_layer_get_layer(s_weather_layer), !settings.ShowWeather);
 
@@ -394,8 +437,8 @@ static void main_window_load(Window *window) {
   layer_add_child(s_root_layer, text_layer_get_layer(s_weekday_text_layer));
   layer_add_child(s_root_layer, text_layer_get_layer(s_weather_layer));
 
-  // Battery meter
-  s_battery_layer = layer_create(scaled_rect(118, 76, 20, 11));
+  // Battery meter - by the "BATTY" label on the right rail
+  s_battery_layer = layer_create(scaled_rect(LY_BATT_X, LY_BATT_Y, LY_BATT_W, LY_BATT_H));
   layer_set_update_proc(s_battery_layer, battery_update_proc);
   layer_add_child(s_root_layer, s_battery_layer);
 
@@ -413,7 +456,6 @@ static void main_window_unload(Window *window) {
 
   fonts_unload_custom_font(s_time_font);
   fonts_unload_custom_font(s_time_mid_font);
-  fonts_unload_custom_font(s_date_font);
   fonts_unload_custom_font(s_letter_font);
 
   gbitmap_destroy(s_background_bitmap);
