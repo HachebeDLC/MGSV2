@@ -315,10 +315,11 @@ static void battery_update_proc(Layer *layer, GContext *ctx) {
 // spreads them at the corners. Walking the perimeter puts mark 5 under the
 // printed "5", mark 10 under "10", mark 45 under "45" (checked on the art).
 //
-// The path is a ROUNDED rectangle, not a sharp one. On a sharp rect the last
-// mark of an edge points inward while the first of the next points sideways,
-// and at the corner the two cross in a plus. Rounding the corners lets the
-// marks pivot gradually, which is also what the real watch does.
+// The path is an OCTAGON, not a rectangle and not a rounded rectangle. The
+// LCD window in bgv2.2.png is chamfered: its corners are straight 45-degree
+// cuts about 5px long, not arcs (the Watchy MGSV face draws the same shape).
+// Following that keeps the marks on the artwork's own outline, and lets them
+// pivot through 45 degrees at each corner instead of jumping 90.
 //
 // Each mark is a short segment normal to the path, pointing inward.
 static void hands_update_proc(Layer *layer, GContext *ctx) {
@@ -328,17 +329,19 @@ static void hands_update_proc(Layer *layer, GContext *ctx) {
   if (w < 24 || h < 24) return;
 
   int32_t small = w < h ? w : h;
-  int32_t r   = small / 7;    // corner radius, matching the artwork
+  int32_t c   = small / 16;   // chamfer leg, matching the artwork
   int32_t len = small / 14;   // mark length, measured off the reference photo
   if (len < 3) len = 3;
+  if (c < 2) c = 2;
 
-  // Segment lengths around the path. The quarter arc is pi*r/2, in fixed point.
-  int32_t run_x = w - 2 * r;          // straight run, top and bottom
-  int32_t run_y = h - 2 * r;          // straight run, left and right
-  int32_t arc   = (r * 1571) / 1000;  // pi/2 * r
-  int32_t half  = run_x / 2;          // top centre -> start of the top-right arc
-  int32_t perim = 2 * run_x + 2 * run_y + 4 * arc;
-  const int32_t Q = TRIG_MAX_ANGLE / 4;
+  // A chamfer of leg c is c*sqrt(2) long; the inward normal is at 45 degrees,
+  // so a mark of length len steps len/sqrt(2) on each axis. 707/1000 ~ 1/sqrt2.
+  int32_t diag = (c * 1414) / 1000;
+  int32_t dl   = (len * 707) / 1000;
+  int32_t run_x = w - 2 * c;
+  int32_t run_y = h - 2 * c;
+  int32_t half  = run_x / 2;
+  int32_t perim = 2 * run_x + 2 * run_y + 4 * diag;
 
   time_t now = time(NULL);
   struct tm *t = localtime(&now);
@@ -351,37 +354,31 @@ static void hands_update_proc(Layer *layer, GContext *ctx) {
 
   for (int i = 0; i < last; i++) {
     int32_t d = ((int32_t)i * perim) / 60;   // walked clockwise from top centre
-    int32_t ox, oy, ix, iy;
+    int32_t ox, oy, ix, iy, k;
 
-    // On an arc: centre + r outward, centre + (r-len) inward, along the radius.
-    #define ARC_POINT(cx, cy, a) do {                                  \
-      int32_t s_ = sin_lookup(a), c_ = cos_lookup(a);                  \
-      ox = (cx) + (s_ * r) / TRIG_MAX_RATIO;                           \
-      oy = (cy) - (c_ * r) / TRIG_MAX_RATIO;                           \
-      ix = (cx) + (s_ * (r - len)) / TRIG_MAX_RATIO;                   \
-      iy = (cy) - (c_ * (r - len)) / TRIG_MAX_RATIO;                   \
-    } while (0)
-
-    if (d < half) {                                   // top edge, centre -> right
-      ox = w / 2 + d;  oy = 0;      ix = ox;  iy = len;
-    } else if ((d -= half) < arc) {                   // top-right corner
-      ARC_POINT(w - r, r, (d * Q) / arc);
-    } else if ((d -= arc) < run_y) {                  // right edge, down
-      ox = w;  oy = r + d;          ix = w - len;  iy = oy;
-    } else if ((d -= run_y) < arc) {                  // bottom-right corner
-      ARC_POINT(w - r, h - r, Q + (d * Q) / arc);
-    } else if ((d -= arc) < run_x) {                  // bottom edge, right -> left
-      ox = w - r - d;  oy = h;      ix = ox;  iy = h - len;
-    } else if ((d -= run_x) < arc) {                  // bottom-left corner
-      ARC_POINT(r, h - r, 2 * Q + (d * Q) / arc);
-    } else if ((d -= arc) < run_y) {                  // left edge, up
-      ox = 0;  oy = h - r - d;      ix = len;  iy = oy;
-    } else if ((d -= run_y) < arc) {                  // top-left corner
-      ARC_POINT(r, r, 3 * Q + (d * Q) / arc);
-    } else {                                          // top edge, left -> centre
-      ox = r + (d - arc);  oy = 0;  ix = ox;  iy = len;
+    if (d < half) {                                 // top edge, centre -> right
+      ox = w / 2 + d;   oy = 0;         ix = ox;        iy = len;
+    } else if ((d -= half) < diag) {                // top-right chamfer
+      k = (d * c) / diag;
+      ox = w - c + k;   oy = k;         ix = ox - dl;   iy = oy + dl;
+    } else if ((d -= diag) < run_y) {               // right edge, down
+      ox = w;           oy = c + d;     ix = w - len;   iy = oy;
+    } else if ((d -= run_y) < diag) {               // bottom-right chamfer
+      k = (d * c) / diag;
+      ox = w - k;       oy = h - c + k; ix = ox - dl;   iy = oy - dl;
+    } else if ((d -= diag) < run_x) {               // bottom edge, right -> left
+      ox = w - c - d;   oy = h;         ix = ox;        iy = h - len;
+    } else if ((d -= run_x) < diag) {               // bottom-left chamfer
+      k = (d * c) / diag;
+      ox = c - k;       oy = h - k;     ix = ox + dl;   iy = oy - dl;
+    } else if ((d -= diag) < run_y) {               // left edge, up
+      ox = 0;           oy = h - c - d; ix = len;       iy = oy;
+    } else if ((d -= run_y) < diag) {               // top-left chamfer
+      k = (d * c) / diag;
+      ox = k;           oy = c - k;     ix = ox + dl;   iy = oy + dl;
+    } else {                                        // top edge, left -> centre
+      ox = c + (d - diag);  oy = 0;     ix = ox;        iy = len;
     }
-    #undef ARC_POINT
 
     graphics_draw_line(ctx, GPoint(ix, iy), GPoint(ox, oy));
   }
