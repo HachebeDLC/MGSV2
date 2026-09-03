@@ -354,10 +354,18 @@ static void update_time(void) {
   }
   text_layer_set_text(s_sec_layer, sec_buffer);
 
-  // Full date in the lower band, in the original project's format:
-  // year, abbreviated month, day-of-month -> "2026 Sep 03".
+  // Date in the lower band: uppercase month + day-of-month, "SEP 03".
+  // No year - neither the Seiko watch nor the in-game HUD shows one; the
+  // original project's "%Y %h %d" was its own invention (and never ran).
+  static char mon_buffer[6];
+  strftime(mon_buffer, sizeof(mon_buffer), "%b", tick_time);
+  for (char *p = mon_buffer; *p; p++) {
+    if (*p >= 'a' && *p <= 'z') {
+      *p = (char)(*p - ('a' - 'A'));
+    }
+  }
   static char date_buffer[16];
-  strftime(date_buffer, sizeof(date_buffer), "%Y %h %d", tick_time);
+  snprintf(date_buffer, sizeof(date_buffer), "%s %02d", mon_buffer, tick_time->tm_mday);
   text_layer_set_text(s_date_layer, date_buffer);
 
   // Day-of-week straight from tm_wday (0=Sunday). Deriving it via strftime
@@ -442,9 +450,9 @@ static void main_window_load(Window *window) {
   s_date_layer = text_layer_create(scaled_rect(LY_DATE_X, LY_DATE_Y, LY_DATE_W, LY_DATE_H));
   text_layer_set_background_color(s_date_layer, GColorClear);
   text_layer_set_text_color(s_date_layer, GColorBlack);
-  text_layer_set_font(s_date_layer, s_time_mid_font);
+  text_layer_set_font(s_date_layer, s_time_font);
   text_layer_set_text_alignment(s_date_layer, GTextAlignmentCenter);
-  text_layer_set_text(s_date_layer, "2026 Sep 03");
+  text_layer_set_text(s_date_layer, "SEP 03");
 
   // Day-of-week - small, right of the time
   s_weekday_text_layer = text_layer_create(scaled_rect(LY_DOW_X, LY_DOW_Y, LY_DOW_W, LY_DOW_H));
