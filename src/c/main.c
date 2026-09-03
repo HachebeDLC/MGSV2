@@ -74,17 +74,19 @@
 // boxes overlap vertically but the glyphs do not, because a TextLayer
 // reserves the font's empty ascender above the ink.
 //
-// Both boxes end at x 138. The rendered right edges still differ by ~2px
+// Both boxes end at x 139, flush with the right edge of the printed rail
+// (CHA/ALM/DATA/PWR.S/IMP.L/BATTY, measured at x 116..139), so the day column
+// continues that rail. The rendered right edges still differ by ~2px
 // because digital-7 is italic and the "3" leans further out than the "H" -
 // a glyph metric, not a layout error; narrowing the box does not move it.
 #define LY_DOW_X       104
 #define LY_DOW_Y       112
-#define LY_DOW_W       34
+#define LY_DOW_W       35
 #define LY_DOW_H       26
 
 #define LY_DOM_X       98
 #define LY_DOM_Y       131
-#define LY_DOM_W       40
+#define LY_DOM_W       41
 #define LY_DOM_H       26
 
 // The box starts above the emblem on purpose: a TextLayer reserves the font's
@@ -95,9 +97,12 @@
 #define LY_TIME_W      80
 #define LY_TIME_H      34
 
-#define LY_DATE_X      6
+// The month is NOT flush left. On the real watch the left half of the band is
+// empty and DEC sits right up against the MO/6 column: measured, DEC spans
+// 43%..79% of the band width. Right-aligned so it ends just before the day.
+#define LY_DATE_X      50
 #define LY_DATE_Y      122
-#define LY_DATE_W      86
+#define LY_DATE_W      58
 #define LY_DATE_H      36
 
 #define LY_WEATHER_X   6
@@ -510,7 +515,7 @@ static void main_window_load(Window *window) {
   text_layer_set_background_color(s_date_layer, GColorClear);
   text_layer_set_text_color(s_date_layer, GColorBlack);
   text_layer_set_font(s_date_layer, s_time_font);
-  text_layer_set_text_alignment(s_date_layer, GTextAlignmentLeft);
+  text_layer_set_text_alignment(s_date_layer, GTextAlignmentRight);
   text_layer_set_text(s_date_layer, "SEP");
 
   // Day-of-week - upper right of the lower band (the "MO" on the watch)
