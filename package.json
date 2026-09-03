@@ -86,6 +86,19 @@
           "targetPlatforms": [
             "emery"
           ]
+        },
+        {
+          "type": "font",
+          "name": "FONT_SMALL_PIXEL_20",
+          "file": "fonts/5x5 (2).ttf"
+        },
+        {
+          "type": "font",
+          "name": "FONT_SMALL_PIXEL_28",
+          "file": "fonts/5x5 (2).ttf",
+          "targetPlatforms": [
+            "emery"
+          ]
         }
       ]
     }

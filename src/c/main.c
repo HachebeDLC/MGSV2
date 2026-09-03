@@ -52,17 +52,18 @@
 #define LY_SEC_W       84
 #define LY_SEC_H       28
 
-// AM/PM and day-of-week flank the printed emblem (y 53..76). Their height
-// must clear the letter font (21px on emery) or the glyphs get clipped.
-#define LY_AMPM_X      18
-#define LY_AMPM_Y      55
-#define LY_AMPM_W      20
-#define LY_AMPM_H      19
+// AM/PM and day-of-week flank the printed emblem (x 48..70, y 53..76), filling
+// the gaps between it and the sweep marks (which reach x 15 and x 101).
+// Their height must clear the label font or the glyphs get clipped.
+#define LY_AMPM_X      17
+#define LY_AMPM_Y      52
+#define LY_AMPM_W      29
+#define LY_AMPM_H      25
 
-#define LY_DOW_X       78
-#define LY_DOW_Y       55
-#define LY_DOW_W       20
-#define LY_DOW_H       19
+#define LY_DOW_X       72
+#define LY_DOW_Y       52
+#define LY_DOW_W       26
+#define LY_DOW_H       25
 
 #define LY_TIME_X      18
 #define LY_TIME_Y      77
@@ -90,10 +91,12 @@
   #define RES_FONT_TIME    RESOURCE_ID_FONT_DIGIT_SEVEN_42
   #define RES_FONT_MID     RESOURCE_ID_FONT_DIGIT_SEVEN_35
   #define RES_FONT_LETTER  RESOURCE_ID_FONT_SMALL_PIXEL_21
+  #define RES_FONT_LABEL   RESOURCE_ID_FONT_SMALL_PIXEL_28
 #else
   #define RES_FONT_TIME    RESOURCE_ID_FONT_DIGIT_SEVEN_30
   #define RES_FONT_MID     RESOURCE_ID_FONT_DIGIT_SEVEN_25
   #define RES_FONT_LETTER  RESOURCE_ID_FONT_SMALL_PIXEL_15
+  #define RES_FONT_LABEL   RESOURCE_ID_FONT_SMALL_PIXEL_20
 #endif
 
 // --- settings -------------------------------------------------------------
@@ -127,6 +130,7 @@ static GBitmap *s_background_bitmap;
 static GFont s_time_font;
 static GFont s_time_mid_font;
 static GFont s_letter_font;
+static GFont s_label_font;
 
 static int s_battery_level;
 
@@ -362,12 +366,13 @@ static void update_time(void) {
   snprintf(date_buffer, sizeof(date_buffer), "%s %02d", mon_buffer, tick_time->tm_mday);
   text_layer_set_text(s_date_layer, date_buffer);
 
-  static char weekday_buffer[2];
-  strftime(weekday_buffer, sizeof(weekday_buffer), "%u", tick_time);
-  static const char *const day_names[] = { "MO", "TU", "WE", "TH", "FR", "SA", "SU" };
-  int idx = weekday_buffer[0] - '1';
-  if (idx >= 0 && idx < 7) {
-    text_layer_set_text(s_weekday_text_layer, day_names[idx]);
+  // Day-of-week straight from tm_wday (0=Sunday). Deriving it via strftime
+  // "%u" needed a 2-byte buffer with no slack; on a short write the label
+  // would silently keep the previous day.
+  static const char *const day_names[] = { "SU", "MO", "TU", "WE", "TH", "FR", "SA" };
+  int wday = tick_time->tm_wday;
+  if (wday >= 0 && wday < 7) {
+    text_layer_set_text(s_weekday_text_layer, day_names[wday]);
   }
 }
 
@@ -414,6 +419,7 @@ static void main_window_load(Window *window) {
   s_time_font = fonts_load_custom_font(resource_get_handle(RES_FONT_TIME));
   s_time_mid_font = fonts_load_custom_font(resource_get_handle(RES_FONT_MID));
   s_letter_font = fonts_load_custom_font(resource_get_handle(RES_FONT_LETTER));
+  s_label_font = fonts_load_custom_font(resource_get_handle(RES_FONT_LABEL));
 
   // Running seconds - large, upper band
   s_sec_layer = text_layer_create(scaled_rect(LY_SEC_X, LY_SEC_Y, LY_SEC_W, LY_SEC_H));
@@ -434,7 +440,7 @@ static void main_window_load(Window *window) {
   s_am_pm_layer = text_layer_create(scaled_rect(LY_AMPM_X, LY_AMPM_Y, LY_AMPM_W, LY_AMPM_H));
   text_layer_set_background_color(s_am_pm_layer, GColorClear);
   text_layer_set_text_color(s_am_pm_layer, GColorBlack);
-  text_layer_set_font(s_am_pm_layer, s_letter_font);
+  text_layer_set_font(s_am_pm_layer, s_label_font);
   text_layer_set_text_alignment(s_am_pm_layer, GTextAlignmentLeft);
   text_layer_set_text(s_am_pm_layer, "AM");
 
@@ -450,7 +456,7 @@ static void main_window_load(Window *window) {
   s_weekday_text_layer = text_layer_create(scaled_rect(LY_DOW_X, LY_DOW_Y, LY_DOW_W, LY_DOW_H));
   text_layer_set_background_color(s_weekday_text_layer, GColorClear);
   text_layer_set_text_color(s_weekday_text_layer, GColorBlack);
-  text_layer_set_font(s_weekday_text_layer, s_letter_font);
+  text_layer_set_font(s_weekday_text_layer, s_label_font);
   text_layer_set_text_alignment(s_weekday_text_layer, GTextAlignmentRight);
   text_layer_set_text(s_weekday_text_layer, "MO");
 
@@ -489,6 +495,7 @@ static void main_window_unload(Window *window) {
   fonts_unload_custom_font(s_time_font);
   fonts_unload_custom_font(s_time_mid_font);
   fonts_unload_custom_font(s_letter_font);
+  fonts_unload_custom_font(s_label_font);
 
   gbitmap_destroy(s_background_bitmap);
 
