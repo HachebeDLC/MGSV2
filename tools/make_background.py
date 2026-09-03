@@ -20,7 +20,10 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FONT_LABEL = os.path.join(ROOT, "resources/fonts/5x5 (2).ttf")
 
 BLACK = (0, 0, 0)
-WHITE = (255, 255, 255)
+# The panel surface. The real LCD is #C2C7A5, a grey with an olive cast; the
+# closest emery can render is #AAAAAA (its palette is 2 bits per channel), which
+# is far nearer the reference than white. Aplite is 1-bit and ignores this.
+PANEL = (170, 170, 170)
 # Emblem / battery bar. Pure yellow rather than amber: the panel washes warm
 # colours toward the red end (the emulator renders 255,170,0 as 241,170,134),
 # so starting saturated is what keeps it reading as gold on the watch.
@@ -141,7 +144,7 @@ def build(W, H, path):
     # The panel itself is the light surface: on the real watch everything dark
     # is a printed mark or a lit segment on that surface, so the background
     # starts white and the artwork is drawn onto it.
-    im = Image.new("RGB", (W, H), WHITE)
+    im = Image.new("RGB", (W, H), PANEL)
     d = ImageDraw.Draw(im)
 
     # --- proportions, taken from the reference photo -----------------------
@@ -208,7 +211,7 @@ def build(W, H, path):
     # PIL antialiases text and polygon edges, which on a 64-colour screen
     # shows up as muddy fringes and on 1-bit aplite as dithering. Snap every
     # pixel to the three colours this artwork actually uses.
-    palette = (BLACK, WHITE, AMBER)
+    palette = (BLACK, PANEL, AMBER)
     px = im.load()
     for y in range(H):
         for x in range(W):
