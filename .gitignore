@@ -80,3 +80,6 @@ $RECYCLE.BIN/
 
 # Windows shortcuts
 *.lnk
+
+# waf build lock
+.lock-waf_*
