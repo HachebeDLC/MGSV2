@@ -28,28 +28,28 @@
 //   month         - large, bottom-centre
 //   manecilla ticks (bottom edge)
 // ---------------------------------------------------------------------------
-#define LY_DOM_X       28
-#define LY_DOM_Y       25
-#define LY_DOM_W       62
-#define LY_DOM_H       30
+#define LY_DOM_X       22
+#define LY_DOM_Y       22
+#define LY_DOM_W       74
+#define LY_DOM_H       26
 
-#define LY_TIME_X      4
-#define LY_TIME_Y      74
+#define LY_TIME_X      6
+#define LY_TIME_Y      68
 #define LY_TIME_W      106
-#define LY_TIME_H      42
+#define LY_TIME_H      34
 
 #define LY_AMPM_X      4
-#define LY_AMPM_Y      78
+#define LY_AMPM_Y      76
 #define LY_AMPM_W      18
 #define LY_AMPM_H      12
 
-#define LY_DOW_X       82
-#define LY_DOW_Y       86
-#define LY_DOW_W       24
+#define LY_DOW_X       68
+#define LY_DOW_Y       74
+#define LY_DOW_W       28
 #define LY_DOW_H       16
 
 #define LY_DATE_X      2
-#define LY_DATE_Y      110
+#define LY_DATE_Y      122
 #define LY_DATE_W      114
 #define LY_DATE_H      30
 
@@ -98,14 +98,12 @@ static TextLayer *s_weekday_text_layer;
 static TextLayer *s_weather_layer;
 
 static Layer *s_hands_layer;
-static Layer *s_diamond_layer;
 static Layer *s_battery_layer;
 
 static BitmapLayer *s_background_layer;
 static GBitmap *s_background_bitmap;
 static BitmapLayer *s_just_diamond_layer;
 static GBitmap *s_just_diamond_bitmap;
-static GBitmap *s_diamond_white_bitmap;
 
 static GFont s_time_font;
 static GFont s_time_mid_font;
@@ -256,50 +254,42 @@ static void battery_update_proc(Layer *layer, GContext *ctx) {
 }
 
 // --- custom layers --------------------------------------------------
-static void diamond_update_proc(Layer *layer, GContext *ctx) {
-  graphics_context_set_compositing_mode(ctx, GCompOpOr);
-  graphics_draw_bitmap_in_rect(ctx, s_diamond_white_bitmap, layer_get_bounds(layer));
-}
-
 static void hands_update_proc(Layer *layer, GContext *ctx) {
-  GRect bounds = layer_get_bounds(layer);
-  GPoint center = grect_center_point(&bounds);
-  int32_t hw = bounds.size.w / 2;
-  int32_t hh = bounds.size.h / 2;
-  int32_t tick_len = (hw < hh ? hw : hh) / 8;   // short inward marks
+  GRect b = layer_get_bounds(layer);
+  int32_t cx = b.size.w / 2;
+  int32_t cy = b.size.h / 2;
+  int32_t hw = cx;
+  int32_t hh = cy;
+  int32_t base = (hw < hh ? hw : hh) / 14;
+  if (base < 3) base = 3;
 
   time_t now = time(NULL);
   struct tm *t = localtime(&now);
+  int elapsed = t->tm_sec;   // 0..59
 
-  // Power-saving: draw the whole ring once; otherwise sweep up to "now".
-  int last = settings.PowerSaving ? 60 : (t->tm_sec + 1);
-
-  // 60 ticks that hug the LCD's rounded-rectangle edge (following the watch
-  // frame, not a circle), filling clockwise from 12 as the seconds advance.
+  // A 60-mark scale hugging the LCD's rounded-rectangle edge, aligned with
+  // the printed 5/10/15... numbers. The marks up to the current second are
+  // drawn longer and bolder - that filling arc is the "manecilla".
   graphics_context_set_stroke_color(ctx, GColorBlack);
-  for (int i = 0; i < last; i++) {
-    int32_t a = TRIG_MAX_ANGLE * i / 60;
-    int32_t dx = sin_lookup(a);          // unit ray, scaled by TRIG_MAX_RATIO
-    int32_t dy = -cos_lookup(a);
-    int32_t adx = dx < 0 ? -dx : dx;
-    int32_t ady = dy < 0 ? -dy : dy;
+  for (int i = 0; i < 60; i++) {
+    int32_t a = (TRIG_MAX_ANGLE * i) / 60;
+    int32_t ux = sin_lookup(a);
+    int32_t uy = -cos_lookup(a);
+    int32_t axx = ux < 0 ? -ux : ux; if (axx < 1) axx = 1;
+    int32_t ayy = uy < 0 ? -uy : uy; if (ayy < 1) ayy = 1;
+    int32_t s1 = (hw * TRIG_MAX_RATIO) / axx;
+    int32_t s2 = (hh * TRIG_MAX_RATIO) / ayy;
+    int32_t s_out = s1 < s2 ? s1 : s2;
 
-    // px from centre to the rectangle edge along this ray
-    int32_t d = 0x7fffffff;
-    if (adx > 0) { int32_t e = hw * TRIG_MAX_RATIO / adx; if (e < d) d = e; }
-    if (ady > 0) { int32_t e = hh * TRIG_MAX_RATIO / ady; if (e < d) d = e; }
-    int32_t d_in = d - tick_len;
-    if (d_in < 0) d_in = 0;
+    bool on = settings.PowerSaving ? true : (i <= elapsed);
+    int32_t len = on ? base * 2 : base;
+    int32_t s_in = s_out - len;
+    if (s_in < 0) s_in = 0;
 
-    GPoint p_out = {
-      .x = center.x + (int16_t)(dx * d / TRIG_MAX_RATIO),
-      .y = center.y + (int16_t)(dy * d / TRIG_MAX_RATIO),
-    };
-    GPoint p_in = {
-      .x = center.x + (int16_t)(dx * d_in / TRIG_MAX_RATIO),
-      .y = center.y + (int16_t)(dy * d_in / TRIG_MAX_RATIO),
-    };
-    graphics_draw_line(ctx, p_in, p_out);
+    graphics_context_set_stroke_width(ctx, on ? 2 : 1);
+    GPoint po = { cx + (ux * s_out) / TRIG_MAX_RATIO, cy + (uy * s_out) / TRIG_MAX_RATIO };
+    GPoint pi = { cx + (ux * s_in)  / TRIG_MAX_RATIO, cy + (uy * s_in)  / TRIG_MAX_RATIO };
+    graphics_draw_line(ctx, pi, po);
   }
 }
 
@@ -377,18 +367,13 @@ static void main_window_load(Window *window) {
   layer_add_child(s_root_layer, bitmap_layer_get_layer(s_background_layer));
 
   // White diamond outline + animated seconds ring (share the same frame)
-  s_diamond_white_bitmap = gbitmap_create_with_resource(RESOURCE_ID_IMAGE_DIAMOND);
-  s_diamond_layer = layer_create(scaled_rect(11, 16, 95, 95));
-  layer_set_update_proc(s_diamond_layer, diamond_update_proc);
-
-  s_hands_layer = layer_create(scaled_rect(11, 16, 95, 132));
+  s_hands_layer = layer_create(scaled_rect(15, 16, 110, 94));
   layer_set_update_proc(s_hands_layer, hands_update_proc);
   layer_add_child(s_root_layer, s_hands_layer);
-  layer_add_child(s_root_layer, s_diamond_layer);
 
   // Small centre diamond
   s_just_diamond_bitmap = gbitmap_create_with_resource(RESOURCE_ID_IMAGE_JUST_THE_DIAMOND);
-  s_just_diamond_layer = bitmap_layer_create(scaled_rect(46, 54, 25, 22));
+  s_just_diamond_layer = bitmap_layer_create(scaled_rect(52, 49, 14, 13));
   bitmap_layer_set_bitmap(s_just_diamond_layer, s_just_diamond_bitmap);
   bitmap_layer_set_alignment(s_just_diamond_layer, GAlignCenter);
   layer_add_child(s_root_layer, bitmap_layer_get_layer(s_just_diamond_layer));
@@ -474,11 +459,9 @@ static void main_window_unload(Window *window) {
   fonts_unload_custom_font(s_letter_font);
 
   gbitmap_destroy(s_background_bitmap);
-  gbitmap_destroy(s_diamond_white_bitmap);
   gbitmap_destroy(s_just_diamond_bitmap);
 
   layer_destroy(s_hands_layer);
-  layer_destroy(s_diamond_layer);
   layer_destroy(s_battery_layer);
   bitmap_layer_destroy(s_background_layer);
   bitmap_layer_destroy(s_just_diamond_layer);

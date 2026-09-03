@@ -2,7 +2,9 @@
   "name": "mgsv2-watchface",
   "author": "MentalShark",
   "version": "2.0.0",
-  "keywords": ["pebble-app"],
+  "keywords": [
+    "pebble-app"
+  ],
   "private": true,
   "dependencies": {
     "@rebble/clay": "^1.0.8"
@@ -12,11 +14,18 @@
     "uuid": "fbf9c9be-8dad-41b7-ba64-2a3790ecf365",
     "sdkVersion": "3",
     "enableMultiJS": true,
-    "targetPlatforms": ["aplite", "basalt", "emery"],
+    "targetPlatforms": [
+      "aplite",
+      "basalt",
+      "emery"
+    ],
     "watchapp": {
       "watchface": true
     },
-    "capabilities": ["location", "configurable"],
+    "capabilities": [
+      "location",
+      "configurable"
+    ],
     "messageKeys": [
       "TEMPERATURE",
       "CONDITIONS",
@@ -28,16 +37,61 @@
     ],
     "resources": {
       "media": [
-        { "type": "bitmap", "name": "IMAGE_BACKGROUND_MGSV", "file": "images/bgv2.2.png" },
-        { "type": "bitmap", "name": "IMAGE_DIAMOND", "file": "images/MGSV2DIAMOND.png" },
-        { "type": "bitmap", "name": "IMAGE_JUST_THE_DIAMOND", "file": "images/MGSV2JUSTTHEDIAMOND.png" },
-        { "type": "bitmap", "name": "IMAGE_ICON", "file": "images/icon.png", "menuIcon": true },
-        { "type": "font", "name": "FONT_DIGIT_SEVEN_30", "file": "fonts/digital-7 (italic).ttf" },
-        { "type": "font", "name": "FONT_DIGIT_SEVEN_25", "file": "fonts/digital-7 (italic).ttf" },
-        { "type": "font", "name": "FONT_SMALL_PIXEL_15", "file": "fonts/5x5 (2).ttf" },
-        { "type": "font", "name": "FONT_DIGIT_SEVEN_42", "file": "fonts/digital-7 (italic).ttf", "targetPlatforms": ["emery"] },
-        { "type": "font", "name": "FONT_DIGIT_SEVEN_35", "file": "fonts/digital-7 (italic).ttf", "targetPlatforms": ["emery"] },
-        { "type": "font", "name": "FONT_SMALL_PIXEL_21", "file": "fonts/5x5 (2).ttf", "targetPlatforms": ["emery"] }
+        {
+          "type": "bitmap",
+          "name": "IMAGE_BACKGROUND_MGSV",
+          "file": "images/bgv2.2.png"
+        },
+        {
+          "type": "bitmap",
+          "name": "IMAGE_JUST_THE_DIAMOND",
+          "file": "images/MGSV2JUSTTHEDIAMOND.png"
+        },
+        {
+          "type": "bitmap",
+          "name": "IMAGE_ICON",
+          "file": "images/icon.png",
+          "menuIcon": true
+        },
+        {
+          "type": "font",
+          "name": "FONT_DIGIT_SEVEN_30",
+          "file": "fonts/digital-7 (italic).ttf"
+        },
+        {
+          "type": "font",
+          "name": "FONT_DIGIT_SEVEN_25",
+          "file": "fonts/digital-7 (italic).ttf"
+        },
+        {
+          "type": "font",
+          "name": "FONT_SMALL_PIXEL_15",
+          "file": "fonts/5x5 (2).ttf"
+        },
+        {
+          "type": "font",
+          "name": "FONT_DIGIT_SEVEN_42",
+          "file": "fonts/digital-7 (italic).ttf",
+          "targetPlatforms": [
+            "emery"
+          ]
+        },
+        {
+          "type": "font",
+          "name": "FONT_DIGIT_SEVEN_35",
+          "file": "fonts/digital-7 (italic).ttf",
+          "targetPlatforms": [
+            "emery"
+          ]
+        },
+        {
+          "type": "font",
+          "name": "FONT_SMALL_PIXEL_21",
+          "file": "fonts/5x5 (2).ttf",
+          "targetPlatforms": [
+            "emery"
+          ]
+        }
       ]
     }
   }
