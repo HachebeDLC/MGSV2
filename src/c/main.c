@@ -120,11 +120,24 @@
 #define LY_MARK_PWRS   44   // power saving
 #define LY_MARK_IMPL   55   // Fahrenheit
 
-// The one empty box on the rail: rotates steps / temperature / sunrise-sunset.
-#define LY_INFO_X      117
-#define LY_INFO_Y      71
-#define LY_INFO_W      22
-#define LY_INFO_H      18
+// Steps live in the rail's one empty box.
+#define LY_STEPS_X     117
+#define LY_STEPS_Y     71
+#define LY_STEPS_W     22
+#define LY_STEPS_H     18
+
+// Weather and sun times take the free left block of the lower band
+// (measured x 6..66, y 122..152) - the slot the real watch gives the
+// stopwatch. Two fixed lines, so nothing has to be waited for.
+#define LY_TEMP_X      7
+#define LY_TEMP_Y      121
+#define LY_TEMP_W      58
+#define LY_TEMP_H      16
+
+#define LY_SUN_X       7
+#define LY_SUN_Y       136
+#define LY_SUN_W       58
+#define LY_SUN_H       16
 
 // Battery moves onto the printed yellow bar, where the real watch has its own.
 #define LY_BATT_X      117
@@ -185,7 +198,9 @@ static bool s_bt_connected;
 static int s_sunrise_min = -1;   // minutes past midnight, -1 = unknown
 static int s_sunset_min  = -1;
 static Layer *s_marks_layer;
-static TextLayer *s_info_layer;
+static TextLayer *s_steps_layer;
+static TextLayer *s_temp_layer;
+static TextLayer *s_sun_layer;
 
 // Last weather sample, kept in Celsius so we can re-render on a unit change
 // without hitting the network again.
@@ -435,44 +450,36 @@ static void hands_update_proc(Layer *layer, GContext *ctx) {
   }
 }
 
-// --- rotating info box -------------------------------------------------
-// One box, three readings. Cycles every 4 seconds; in power-saving mode the
-// tick is a minute, so it simply advances once a minute instead.
-static void prv_update_info(struct tm *t) {
-  static char buf[12];
-  int slot = (t->tm_sec / 4) % 3;
-
-  // Skip a slot we have no data for, so the box never shows a blank.
-  for (int tries = 0; tries < 3; tries++) {
-    if (slot == 0) {
+// --- secondary readouts ------------------------------------------------
+// Each value has a fixed home, so none of them has to be waited for. A slot
+// with no data yet simply stays blank rather than showing a placeholder.
+static void prv_update_readouts(void) {
+  static char steps_buf[12];
+  steps_buf[0] = '\0';
 #if defined(PBL_HEALTH)
-      HealthValue steps = health_service_sum_today(HealthMetricStepCount);
-      if (steps > 0) { snprintf(buf, sizeof(buf), "%d", (int)steps); break; }
+  HealthValue steps = health_service_sum_today(HealthMetricStepCount);
+  if (steps > 0) snprintf(steps_buf, sizeof(steps_buf), "%d", (int)steps);
 #endif
-    } else if (slot == 1) {
-      if (settings.ShowWeather && s_weather_valid) {
-        int v = s_weather_temp_c;
-        char u = 'C';
-        if (settings.TemperatureUnit) { v = v * 9 / 5 + 32; u = 'F'; }
-        snprintf(buf, sizeof(buf), "%d%c", v, u);
-        break;
-      }
-    } else {
-      // Show whichever of sunrise/sunset is still ahead today.
-      int now = t->tm_hour * 60 + t->tm_min;
-      int when = -1;
-      if (s_sunrise_min >= 0 && now < s_sunrise_min)      when = s_sunrise_min;
-      else if (s_sunset_min >= 0 && now < s_sunset_min)   when = s_sunset_min;
-      else if (s_sunrise_min >= 0)                        when = s_sunrise_min;
-      if (when >= 0) {
-        snprintf(buf, sizeof(buf), "%d:%02d", when / 60, when % 60);
-        break;
-      }
-    }
-    slot = (slot + 1) % 3;
-    if (tries == 2) buf[0] = '\0';
+  text_layer_set_text(s_steps_layer, steps_buf);
+
+  static char temp_buf[48];   // holds the longest condition string
+  temp_buf[0] = '\0';
+  if (settings.ShowWeather && s_weather_valid) {
+    int v = s_weather_temp_c;
+    char u = 'C';
+    if (settings.TemperatureUnit) { v = v * 9 / 5 + 32; u = 'F'; }
+    snprintf(temp_buf, sizeof(temp_buf), "%d%c %s", v, u, s_conditions_buffer);
   }
-  text_layer_set_text(s_info_layer, buf);
+  text_layer_set_text(s_temp_layer, temp_buf);
+
+  static char sun_buf[24];
+  sun_buf[0] = '\0';
+  if (s_sunrise_min >= 0 && s_sunset_min >= 0) {
+    snprintf(sun_buf, sizeof(sun_buf), "%d:%02d %d:%02d",
+             s_sunrise_min / 60, s_sunrise_min % 60,
+             s_sunset_min / 60, s_sunset_min % 60);
+  }
+  text_layer_set_text(s_sun_layer, sun_buf);
 }
 
 // --- time / date ---------------------------------------------------
@@ -503,7 +510,7 @@ static void update_time(void) {
   }
   text_layer_set_text(s_sec_layer, sec_buffer);
 
-  prv_update_info(tick_time);
+  prv_update_readouts();
 
   // Lower band, as on the real watch: month large on the left, day-of-week
   // above day-of-month on the right. No year - neither the Seiko nor the
@@ -632,14 +639,31 @@ static void main_window_load(Window *window) {
   layer_add_child(s_root_layer, text_layer_get_layer(s_weekday_text_layer));
   layer_add_child(s_root_layer, text_layer_get_layer(s_dom_layer));
 
-  // Rotating readout in the rail's one empty box
-  s_info_layer = text_layer_create(scaled_rect(LY_INFO_X, LY_INFO_Y, LY_INFO_W, LY_INFO_H));
-  text_layer_set_background_color(s_info_layer, GColorClear);
-  text_layer_set_text_color(s_info_layer, GColorBlack);
-  text_layer_set_font(s_info_layer, s_letter_font);
-  text_layer_set_text_alignment(s_info_layer, GTextAlignmentCenter);
-  text_layer_set_text(s_info_layer, "");
-  layer_add_child(s_root_layer, text_layer_get_layer(s_info_layer));
+  // Steps, in the rail's one empty box
+  s_steps_layer = text_layer_create(scaled_rect(LY_STEPS_X, LY_STEPS_Y, LY_STEPS_W, LY_STEPS_H));
+  text_layer_set_background_color(s_steps_layer, GColorClear);
+  text_layer_set_text_color(s_steps_layer, GColorBlack);
+  text_layer_set_font(s_steps_layer, s_letter_font);
+  text_layer_set_text_alignment(s_steps_layer, GTextAlignmentCenter);
+  text_layer_set_text(s_steps_layer, "");
+  layer_add_child(s_root_layer, text_layer_get_layer(s_steps_layer));
+
+  // Weather and sun times, in the band's free left block
+  s_temp_layer = text_layer_create(scaled_rect(LY_TEMP_X, LY_TEMP_Y, LY_TEMP_W, LY_TEMP_H));
+  text_layer_set_background_color(s_temp_layer, GColorClear);
+  text_layer_set_text_color(s_temp_layer, GColorBlack);
+  text_layer_set_font(s_temp_layer, s_letter_font);
+  text_layer_set_text_alignment(s_temp_layer, GTextAlignmentLeft);
+  text_layer_set_text(s_temp_layer, "");
+  layer_add_child(s_root_layer, text_layer_get_layer(s_temp_layer));
+
+  s_sun_layer = text_layer_create(scaled_rect(LY_SUN_X, LY_SUN_Y, LY_SUN_W, LY_SUN_H));
+  text_layer_set_background_color(s_sun_layer, GColorClear);
+  text_layer_set_text_color(s_sun_layer, GColorBlack);
+  text_layer_set_font(s_sun_layer, s_letter_font);
+  text_layer_set_text_alignment(s_sun_layer, GTextAlignmentLeft);
+  text_layer_set_text(s_sun_layer, "");
+  layer_add_child(s_root_layer, text_layer_get_layer(s_sun_layer));
 
   // Battery, on the printed yellow bar
   s_battery_layer = layer_create(scaled_rect(LY_BATT_X, LY_BATT_Y, LY_BATT_W, LY_BATT_H));
@@ -671,7 +695,9 @@ static void main_window_unload(Window *window) {
   gbitmap_destroy(s_background_bitmap);
 
   layer_destroy(s_hands_layer);
-  text_layer_destroy(s_info_layer);
+  text_layer_destroy(s_steps_layer);
+  text_layer_destroy(s_temp_layer);
+  text_layer_destroy(s_sun_layer);
   layer_destroy(s_battery_layer);
   layer_destroy(s_marks_layer);
   bitmap_layer_destroy(s_background_layer);
