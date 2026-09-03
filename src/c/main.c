@@ -70,10 +70,10 @@
 #define LY_TIME_W      80
 #define LY_TIME_H      28
 
-#define LY_DATE_X      8
-#define LY_DATE_Y      124
-#define LY_DATE_W      128
-#define LY_DATE_H      28
+#define LY_DATE_X      4
+#define LY_DATE_Y      122
+#define LY_DATE_W      136
+#define LY_DATE_H      31
 
 #define LY_WEATHER_X   6
 #define LY_WEATHER_Y   1
@@ -354,16 +354,10 @@ static void update_time(void) {
   }
   text_layer_set_text(s_sec_layer, sec_buffer);
 
-  // Full date in the lower band: uppercase month + day-of-month, "SEP 03".
-  static char mon_buffer[6];
-  strftime(mon_buffer, sizeof(mon_buffer), "%b", tick_time);
-  for (char *p = mon_buffer; *p; p++) {
-    if (*p >= 'a' && *p <= 'z') {
-      *p = (char)(*p - ('a' - 'A'));
-    }
-  }
+  // Full date in the lower band, in the original project's format:
+  // year, abbreviated month, day-of-month -> "2026 Sep 03".
   static char date_buffer[16];
-  snprintf(date_buffer, sizeof(date_buffer), "%s %02d", mon_buffer, tick_time->tm_mday);
+  strftime(date_buffer, sizeof(date_buffer), "%Y %h %d", tick_time);
   text_layer_set_text(s_date_layer, date_buffer);
 
   // Day-of-week straight from tm_wday (0=Sunday). Deriving it via strftime
@@ -450,7 +444,7 @@ static void main_window_load(Window *window) {
   text_layer_set_text_color(s_date_layer, GColorBlack);
   text_layer_set_font(s_date_layer, s_time_mid_font);
   text_layer_set_text_alignment(s_date_layer, GTextAlignmentCenter);
-  text_layer_set_text(s_date_layer, "SEP 03");
+  text_layer_set_text(s_date_layer, "2026 Sep 03");
 
   // Day-of-week - small, right of the time
   s_weekday_text_layer = text_layer_create(scaled_rect(LY_DOW_X, LY_DOW_Y, LY_DOW_W, LY_DOW_H));
