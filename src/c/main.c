@@ -18,37 +18,39 @@
 #define DESIGN_H 168
 
 // ---------------------------------------------------------------------------
-// Field layout, in 144x168 design-canvas coords (scaled to the real screen at
-// runtime). Positions mirror the Seiko NextAge MGSV watch:
-//   - big running seconds in the top-right of the LCD
-//   - HH:MM centred over the Diamond Dogs emblem
-//   - abbreviated month + day-of-month large, lower-centre (the "DEC" slot)
-//   - small day-of-week in the top-left
-// Tweak these if anything clips or overlaps the printed bezel art.
+// Field layout, in 144x168 design-canvas coords (scaled to the real screen).
+// Vertical stack inside the LCD, mirroring the Seiko NextAge MGSV watch:
+//   manecilla ticks (top edge)
+//   day-of-month  - large, top-centre
+//   emblem        - centre
+//   HH:MM         - large, centre   (tiny AM/PM to its left)
+//   day-of-week   - small, right of the time
+//   month         - large, bottom-centre
+//   manecilla ticks (bottom edge)
 // ---------------------------------------------------------------------------
-#define LY_SEC_X       64
-#define LY_SEC_Y       13
-#define LY_SEC_W       44
-#define LY_SEC_H       36
+#define LY_DOM_X       28
+#define LY_DOM_Y       25
+#define LY_DOM_W       62
+#define LY_DOM_H       30
 
-#define LY_DOW_X       10
-#define LY_DOW_Y       14
-#define LY_DOW_W       34
-#define LY_DOW_H       14
+#define LY_TIME_X      4
+#define LY_TIME_Y      74
+#define LY_TIME_W      106
+#define LY_TIME_H      42
 
-#define LY_TIME_X      6
-#define LY_TIME_Y      66
-#define LY_TIME_W      102
-#define LY_TIME_H      48
-
-#define LY_AMPM_X      8
-#define LY_AMPM_Y      56
-#define LY_AMPM_W      20
+#define LY_AMPM_X      4
+#define LY_AMPM_Y      78
+#define LY_AMPM_W      18
 #define LY_AMPM_H      12
 
-#define LY_DATE_X      6
-#define LY_DATE_Y      108
-#define LY_DATE_W      104
+#define LY_DOW_X       82
+#define LY_DOW_Y       86
+#define LY_DOW_W       24
+#define LY_DOW_H       16
+
+#define LY_DATE_X      2
+#define LY_DATE_Y      110
+#define LY_DATE_W      114
 #define LY_DATE_H      30
 
 #define LY_WEATHER_X   6
@@ -89,7 +91,7 @@ static Layer *s_root_layer;
 static GRect s_bounds;
 
 static TextLayer *s_time_layer;
-static TextLayer *s_time_sec_layer;
+static TextLayer *s_dom_layer;
 static TextLayer *s_am_pm_layer;
 static TextLayer *s_date_layer;
 static TextLayer *s_weekday_text_layer;
@@ -311,14 +313,6 @@ static void update_time(void) {
   strftime(buffer, sizeof(buffer), h24 ? "%H:%M" : "%I:%M", tick_time);
   text_layer_set_text(s_time_layer, buffer);
 
-  static char sec_buffer[3];
-  if (settings.PowerSaving) {
-    sec_buffer[0] = '\0';
-  } else {
-    strftime(sec_buffer, sizeof(sec_buffer), "%S", tick_time);
-  }
-  text_layer_set_text(s_time_sec_layer, sec_buffer);
-
   static char am_buffer[3];
   if (h24) {
     am_buffer[0] = '\0';
@@ -327,18 +321,20 @@ static void update_time(void) {
   }
   text_layer_set_text(s_am_pm_layer, am_buffer);
 
-  // "DEC 03" style: uppercase abbreviated month + day-of-month, like the
-  // real watch's date field.
-  static char mon_buf[6];
-  strftime(mon_buf, sizeof(mon_buf), "%b", tick_time);
-  for (char *p = mon_buf; *p; p++) {
+  // Day-of-month on its own, big, at the top (like the real watch).
+  static char dom_buffer[3];
+  strftime(dom_buffer, sizeof(dom_buffer), "%d", tick_time);
+  text_layer_set_text(s_dom_layer, dom_buffer);
+
+  // Uppercase abbreviated month, big, at the bottom (the "MAR" slot).
+  static char mon_buffer[6];
+  strftime(mon_buffer, sizeof(mon_buffer), "%b", tick_time);
+  for (char *p = mon_buffer; *p; p++) {
     if (*p >= 'a' && *p <= 'z') {
       *p = (char)(*p - ('a' - 'A'));
     }
   }
-  static char date_buffer[16];
-  snprintf(date_buffer, sizeof(date_buffer), "%s %02d", mon_buf, tick_time->tm_mday);
-  text_layer_set_text(s_date_layer, date_buffer);
+  text_layer_set_text(s_date_layer, mon_buffer);
 
   static char weekday_buffer[2];
   strftime(weekday_buffer, sizeof(weekday_buffer), "%u", tick_time);
@@ -392,7 +388,7 @@ static void main_window_load(Window *window) {
 
   // Small centre diamond
   s_just_diamond_bitmap = gbitmap_create_with_resource(RESOURCE_ID_IMAGE_JUST_THE_DIAMOND);
-  s_just_diamond_layer = bitmap_layer_create(scaled_rect(46, 51, 25, 25));
+  s_just_diamond_layer = bitmap_layer_create(scaled_rect(46, 54, 25, 22));
   bitmap_layer_set_bitmap(s_just_diamond_layer, s_just_diamond_bitmap);
   bitmap_layer_set_alignment(s_just_diamond_layer, GAlignCenter);
   layer_add_child(s_root_layer, bitmap_layer_get_layer(s_just_diamond_layer));
@@ -402,21 +398,21 @@ static void main_window_load(Window *window) {
   s_time_mid_font = fonts_load_custom_font(resource_get_handle(RES_FONT_MID));
   s_letter_font = fonts_load_custom_font(resource_get_handle(RES_FONT_LETTER));
 
-  // HH:MM - centred over the emblem
+  // Day-of-month - large, top-centre
+  s_dom_layer = text_layer_create(scaled_rect(LY_DOM_X, LY_DOM_Y, LY_DOM_W, LY_DOM_H));
+  text_layer_set_background_color(s_dom_layer, GColorClear);
+  text_layer_set_text_color(s_dom_layer, GColorBlack);
+  text_layer_set_font(s_dom_layer, s_time_mid_font);
+  text_layer_set_text_alignment(s_dom_layer, GTextAlignmentCenter);
+  text_layer_set_text(s_dom_layer, "03");
+
+  // HH:MM - centred
   s_time_layer = text_layer_create(scaled_rect(LY_TIME_X, LY_TIME_Y, LY_TIME_W, LY_TIME_H));
   text_layer_set_background_color(s_time_layer, GColorClear);
   text_layer_set_text_color(s_time_layer, GColorBlack);
   text_layer_set_font(s_time_layer, s_time_font);
   text_layer_set_text_alignment(s_time_layer, GTextAlignmentCenter);
   text_layer_set_text(s_time_layer, "00:00");
-
-  // Running seconds - big, top-right of the LCD ("42" on the real watch)
-  s_time_sec_layer = text_layer_create(scaled_rect(LY_SEC_X, LY_SEC_Y, LY_SEC_W, LY_SEC_H));
-  text_layer_set_background_color(s_time_sec_layer, GColorClear);
-  text_layer_set_text_color(s_time_sec_layer, GColorBlack);
-  text_layer_set_font(s_time_sec_layer, s_time_mid_font);
-  text_layer_set_text_alignment(s_time_sec_layer, GTextAlignmentRight);
-  text_layer_set_text(s_time_sec_layer, "00");
 
   s_am_pm_layer = text_layer_create(scaled_rect(LY_AMPM_X, LY_AMPM_Y, LY_AMPM_W, LY_AMPM_H));
   text_layer_set_background_color(s_am_pm_layer, GColorClear);
@@ -425,20 +421,20 @@ static void main_window_load(Window *window) {
   text_layer_set_text_alignment(s_am_pm_layer, GTextAlignmentLeft);
   text_layer_set_text(s_am_pm_layer, "AM");
 
-  // Month + day-of-month - large, lower-centre (the "DEC" slot)
+  // Month - large, bottom-centre (the "MAR" slot)
   s_date_layer = text_layer_create(scaled_rect(LY_DATE_X, LY_DATE_Y, LY_DATE_W, LY_DATE_H));
   text_layer_set_background_color(s_date_layer, GColorClear);
   text_layer_set_text_color(s_date_layer, GColorBlack);
   text_layer_set_font(s_date_layer, s_time_mid_font);
   text_layer_set_text_alignment(s_date_layer, GTextAlignmentCenter);
-  text_layer_set_text(s_date_layer, "SEP 03");
+  text_layer_set_text(s_date_layer, "MAR");
 
-  // Day-of-week - small, top-left
+  // Day-of-week - small, right of the time
   s_weekday_text_layer = text_layer_create(scaled_rect(LY_DOW_X, LY_DOW_Y, LY_DOW_W, LY_DOW_H));
   text_layer_set_background_color(s_weekday_text_layer, GColorClear);
   text_layer_set_text_color(s_weekday_text_layer, GColorBlack);
   text_layer_set_font(s_weekday_text_layer, s_letter_font);
-  text_layer_set_text_alignment(s_weekday_text_layer, GTextAlignmentLeft);
+  text_layer_set_text_alignment(s_weekday_text_layer, GTextAlignmentRight);
   text_layer_set_text(s_weekday_text_layer, "MO");
 
   s_weather_layer = text_layer_create(scaled_rect(LY_WEATHER_X, LY_WEATHER_Y, LY_WEATHER_W, LY_WEATHER_H));
@@ -449,8 +445,8 @@ static void main_window_load(Window *window) {
   text_layer_set_text(s_weather_layer, "");
   layer_set_hidden(text_layer_get_layer(s_weather_layer), !settings.ShowWeather);
 
+  layer_add_child(s_root_layer, text_layer_get_layer(s_dom_layer));
   layer_add_child(s_root_layer, text_layer_get_layer(s_time_layer));
-  layer_add_child(s_root_layer, text_layer_get_layer(s_time_sec_layer));
   layer_add_child(s_root_layer, text_layer_get_layer(s_am_pm_layer));
   layer_add_child(s_root_layer, text_layer_get_layer(s_date_layer));
   layer_add_child(s_root_layer, text_layer_get_layer(s_weekday_text_layer));
@@ -467,7 +463,7 @@ static void main_window_load(Window *window) {
 
 static void main_window_unload(Window *window) {
   text_layer_destroy(s_time_layer);
-  text_layer_destroy(s_time_sec_layer);
+  text_layer_destroy(s_dom_layer);
   text_layer_destroy(s_am_pm_layer);
   text_layer_destroy(s_date_layer);
   text_layer_destroy(s_weekday_text_layer);
