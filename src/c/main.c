@@ -19,39 +19,58 @@
 
 // ---------------------------------------------------------------------------
 // Field layout, in 144x168 design-canvas coords (scaled to the real screen).
-// Vertical stack inside the LCD, mirroring the Seiko NextAge MGSV watch:
-//   manecilla ticks (top edge)
-//   day-of-month  - large, top-centre
-//   emblem        - centre
-//   HH:MM         - large, centre   (tiny AM/PM to its left)
-//   day-of-week   - small, right of the time
-//   month         - large, bottom-centre
-//   manecilla ticks (bottom edge)
+//
+// Measured from bgv2.2.png rather than guessed:
+//   main LCD window : x 11..105, y 17..110   (LCD_* below)
+//   printed emblem  : x 48..70,  y 53..76    (already part of the artwork)
+//   lower band      : x  4..139, y 122..152
+// Nothing may extend past the LCD window or it lands on the printed bezel
+// labels (CHA / ALM / DATA / PWR.S / IMP.L / BATTY) on the right rail.
+//
+// Fields are placed around the printed emblem, Seiko-style:
+//   day-of-month  above it, AM/PM left of it, day-of-week right of it,
+//   HH:MM below it, month in the lower band.
 // ---------------------------------------------------------------------------
-#define LY_DOM_X       22
+#define LCD_X          11
+#define LCD_Y          17
+#define LCD_W          94
+#define LCD_H          93
+
+// The seconds sweep runs just inside the LCD border. It cannot go on the
+// bezel: that ring is already occupied by the printed ADJUST/START.STOP text
+// and the 55/60/5 - 50 - 45 - 40 - 35/30/25 scale numbers.
+#define RING_X         LCD_X
+#define RING_Y         LCD_Y
+#define RING_W         LCD_W
+#define RING_H         LCD_H
+
+// Readouts keep a ~5px margin from the LCD edge so the sweep never overlaps.
+#define LY_DOM_X       16
 #define LY_DOM_Y       22
-#define LY_DOM_W       74
+#define LY_DOM_W       84
 #define LY_DOM_H       26
 
-#define LY_TIME_X      6
-#define LY_TIME_Y      68
-#define LY_TIME_W      106
-#define LY_TIME_H      34
+// AM/PM and day-of-week flank the printed emblem (y 53..76). Their height
+// must clear the letter font (21px on emery) or the glyphs get clipped.
+#define LY_AMPM_X      18
+#define LY_AMPM_Y      55
+#define LY_AMPM_W      20
+#define LY_AMPM_H      19
 
-#define LY_AMPM_X      4
-#define LY_AMPM_Y      76
-#define LY_AMPM_W      18
-#define LY_AMPM_H      12
+#define LY_DOW_X       78
+#define LY_DOW_Y       55
+#define LY_DOW_W       20
+#define LY_DOW_H       19
 
-#define LY_DOW_X       68
-#define LY_DOW_Y       74
-#define LY_DOW_W       28
-#define LY_DOW_H       16
+#define LY_TIME_X      14
+#define LY_TIME_Y      74
+#define LY_TIME_W      88
+#define LY_TIME_H      30
 
-#define LY_DATE_X      2
-#define LY_DATE_Y      122
-#define LY_DATE_W      114
-#define LY_DATE_H      30
+#define LY_DATE_X      8
+#define LY_DATE_Y      124
+#define LY_DATE_W      128
+#define LY_DATE_H      28
 
 #define LY_WEATHER_X   6
 #define LY_WEATHER_Y   1
@@ -102,8 +121,6 @@ static Layer *s_battery_layer;
 
 static BitmapLayer *s_background_layer;
 static GBitmap *s_background_bitmap;
-static BitmapLayer *s_just_diamond_layer;
-static GBitmap *s_just_diamond_bitmap;
 
 static GFont s_time_font;
 static GFont s_time_mid_font;
@@ -260,18 +277,22 @@ static void hands_update_proc(Layer *layer, GContext *ctx) {
   int32_t cy = b.size.h / 2;
   int32_t hw = cx;
   int32_t hh = cy;
-  int32_t base = (hw < hh ? hw : hh) / 14;
-  if (base < 3) base = 3;
+  if (hw < 4 || hh < 4) return;
+
+  int32_t len = (hw < hh ? hw : hh) / 15;   // short marks, inward
+  if (len < 3) len = 3;
 
   time_t now = time(NULL);
   struct tm *t = localtime(&now);
   int elapsed = t->tm_sec;   // 0..59
 
-  // A 60-mark scale hugging the LCD's rounded-rectangle edge, aligned with
-  // the printed 5/10/15... numbers. The marks up to the current second are
-  // drawn longer and bolder - that filling arc is the "manecilla".
+  // Only the elapsed marks are drawn - the arc grows clockwise from 12 over
+  // the minute, like the sweep on the real watch. Each mark is projected onto
+  // the LCD's rounded-rectangle perimeter so it follows the watch frame.
   graphics_context_set_stroke_color(ctx, GColorBlack);
-  for (int i = 0; i < 60; i++) {
+  graphics_context_set_stroke_width(ctx, 2);
+  int last = settings.PowerSaving ? 60 : (elapsed + 1);
+  for (int i = 0; i < last; i++) {
     int32_t a = (TRIG_MAX_ANGLE * i) / 60;
     int32_t ux = sin_lookup(a);
     int32_t uy = -cos_lookup(a);
@@ -280,13 +301,9 @@ static void hands_update_proc(Layer *layer, GContext *ctx) {
     int32_t s1 = (hw * TRIG_MAX_RATIO) / axx;
     int32_t s2 = (hh * TRIG_MAX_RATIO) / ayy;
     int32_t s_out = s1 < s2 ? s1 : s2;
-
-    bool on = settings.PowerSaving ? true : (i <= elapsed);
-    int32_t len = on ? base * 2 : base;
     int32_t s_in = s_out - len;
     if (s_in < 0) s_in = 0;
 
-    graphics_context_set_stroke_width(ctx, on ? 2 : 1);
     GPoint po = { cx + (ux * s_out) / TRIG_MAX_RATIO, cy + (uy * s_out) / TRIG_MAX_RATIO };
     GPoint pi = { cx + (ux * s_in)  / TRIG_MAX_RATIO, cy + (uy * s_in)  / TRIG_MAX_RATIO };
     graphics_draw_line(ctx, pi, po);
@@ -366,17 +383,13 @@ static void main_window_load(Window *window) {
   bitmap_layer_set_alignment(s_background_layer, GAlignCenter);
   layer_add_child(s_root_layer, bitmap_layer_get_layer(s_background_layer));
 
-  // White diamond outline + animated seconds ring (share the same frame)
-  s_hands_layer = layer_create(scaled_rect(15, 16, 110, 94));
+  // Seconds sweep - rides the printed scale ring on the bezel, clear of both
+  // the LCD readouts and the labels on the right rail.
+  s_hands_layer = layer_create(scaled_rect(RING_X, RING_Y, RING_W, RING_H));
   layer_set_update_proc(s_hands_layer, hands_update_proc);
   layer_add_child(s_root_layer, s_hands_layer);
 
-  // Small centre diamond
-  s_just_diamond_bitmap = gbitmap_create_with_resource(RESOURCE_ID_IMAGE_JUST_THE_DIAMOND);
-  s_just_diamond_layer = bitmap_layer_create(scaled_rect(52, 49, 14, 13));
-  bitmap_layer_set_bitmap(s_just_diamond_layer, s_just_diamond_bitmap);
-  bitmap_layer_set_alignment(s_just_diamond_layer, GAlignCenter);
-  layer_add_child(s_root_layer, bitmap_layer_get_layer(s_just_diamond_layer));
+  // The Diamond Dogs emblem is already part of bgv2.2.png - nothing to draw.
 
   // Fonts
   s_time_font = fonts_load_custom_font(resource_get_handle(RES_FONT_TIME));
@@ -459,12 +472,10 @@ static void main_window_unload(Window *window) {
   fonts_unload_custom_font(s_letter_font);
 
   gbitmap_destroy(s_background_bitmap);
-  gbitmap_destroy(s_just_diamond_bitmap);
 
   layer_destroy(s_hands_layer);
   layer_destroy(s_battery_layer);
   bitmap_layer_destroy(s_background_layer);
-  bitmap_layer_destroy(s_just_diamond_layer);
 }
 
 // --- app lifecycle -----------------------------------------------

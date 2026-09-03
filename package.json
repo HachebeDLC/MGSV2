@@ -44,11 +44,6 @@
         },
         {
           "type": "bitmap",
-          "name": "IMAGE_JUST_THE_DIAMOND",
-          "file": "images/MGSV2JUSTTHEDIAMOND.png"
-        },
-        {
-          "type": "bitmap",
           "name": "IMAGE_ICON",
           "file": "images/icon.png",
           "menuIcon": true
