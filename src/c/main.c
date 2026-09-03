@@ -262,23 +262,33 @@ static void diamond_update_proc(Layer *layer, GContext *ctx) {
 static void hands_update_proc(Layer *layer, GContext *ctx) {
   GRect bounds = layer_get_bounds(layer);
   GPoint center = grect_center_point(&bounds);
-  int16_t second_hand_length = bounds.size.w / 1.5;
+
+  // Short radial ticks on the OUTER edge of the dial (like the sunburst on
+  // the real watch), filling clockwise from 12 as the seconds advance -
+  // not full-length lines from the centre.
+  int32_t r_out = (bounds.size.w < bounds.size.h ? bounds.size.w : bounds.size.h) / 2;
+  int32_t r_in = r_out - (r_out / 5);
 
   time_t now = time(NULL);
   struct tm *t = localtime(&now);
 
-  // In power-saving mode draw the full ring once; otherwise sweep up to the
-  // current second so the ring "fills" over a minute.
+  // Power-saving: draw the whole ring once; otherwise sweep up to "now".
   int last = settings.PowerSaving ? 60 : (t->tm_sec + 1);
 
   graphics_context_set_stroke_color(ctx, GColorBlack);
   for (int i = 0; i < last; i++) {
-    int32_t second_angle = TRIG_MAX_ANGLE * i / 60;
-    GPoint second_hand = {
-      .x = (int16_t)(sin_lookup(second_angle) * (int32_t)second_hand_length / TRIG_MAX_RATIO) + center.x,
-      .y = (int16_t)(-cos_lookup(second_angle) * (int32_t)second_hand_length / TRIG_MAX_RATIO) + center.y,
+    int32_t a = TRIG_MAX_ANGLE * i / 60;
+    int32_t s = sin_lookup(a);
+    int32_t c = cos_lookup(a);
+    GPoint p_out = {
+      .x = center.x + (int16_t)(s * r_out / TRIG_MAX_RATIO),
+      .y = center.y - (int16_t)(c * r_out / TRIG_MAX_RATIO),
     };
-    graphics_draw_line(ctx, second_hand, center);
+    GPoint p_in = {
+      .x = center.x + (int16_t)(s * r_in / TRIG_MAX_RATIO),
+      .y = center.y - (int16_t)(c * r_in / TRIG_MAX_RATIO),
+    };
+    graphics_draw_line(ctx, p_in, p_out);
   }
 }
 
