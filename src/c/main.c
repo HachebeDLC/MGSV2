@@ -105,15 +105,32 @@
 #define LY_DATE_W      58
 #define LY_DATE_H      36
 
-#define LY_WEATHER_X   6
-#define LY_WEATHER_Y   1
-#define LY_WEATHER_W   (DESIGN_W - 12)
-#define LY_WEATHER_H   12
 
-#define LY_BATT_X      118
-#define LY_BATT_Y      76
-#define LY_BATT_W      20
-#define LY_BATT_H      11
+// Right rail, measured off bgv2.2.png. The five labelled boxes already carry
+// printed text, so they can only be lit, not filled with a value. The marker
+// goes in the narrow black strip at x 114..115: the gutter is wider than that,
+// but x 107..113 already carries the printed 10/15/20 scale numbers. The real
+// watch marks its active mode the same way, with a caret beside the label.
+#define LY_MARK_X      114
+#define LY_MARK_W      2
+#define LY_MARK_H      7
+#define LY_MARK_CHA    12   // charging
+#define LY_MARK_ALM    22   // quiet time
+#define LY_MARK_DATA   33   // phone connected
+#define LY_MARK_PWRS   44   // power saving
+#define LY_MARK_IMPL   55   // Fahrenheit
+
+// The one empty box on the rail: rotates steps / temperature / sunrise-sunset.
+#define LY_INFO_X      117
+#define LY_INFO_Y      71
+#define LY_INFO_W      22
+#define LY_INFO_H      18
+
+// Battery moves onto the printed yellow bar, where the real watch has its own.
+#define LY_BATT_X      117
+#define LY_BATT_Y      92
+#define LY_BATT_W      22
+#define LY_BATT_H      4
 
 // Platform-scaled fonts. The "~emery" project fonts are only bundled for
 // emery (see package.json), so guard their use.
@@ -150,7 +167,6 @@ static TextLayer *s_dom_layer;
 static TextLayer *s_am_pm_layer;
 static TextLayer *s_date_layer;
 static TextLayer *s_weekday_text_layer;
-static TextLayer *s_weather_layer;
 
 static Layer *s_hands_layer;
 static Layer *s_battery_layer;
@@ -164,13 +180,18 @@ static GFont s_letter_font;
 static GFont s_label_font;
 
 static int s_battery_level;
+static bool s_charging;
+static bool s_bt_connected;
+static int s_sunrise_min = -1;   // minutes past midnight, -1 = unknown
+static int s_sunset_min  = -1;
+static Layer *s_marks_layer;
+static TextLayer *s_info_layer;
 
 // Last weather sample, kept in Celsius so we can re-render on a unit change
 // without hitting the network again.
 static int s_weather_temp_c;
 static bool s_weather_valid;
 static char s_conditions_buffer[32];
-static char s_weather_buffer[42];
 
 static void update_time(void);
 static void tick_handler(struct tm *tick_time, TimeUnits units_changed);
@@ -205,30 +226,12 @@ static bool prv_use_24h(void) {
   return clock_is_24h_style();
 }
 
-static void prv_render_weather(void) {
-  if (!s_weather_valid) {
-    return;
-  }
-  int t = s_weather_temp_c;
-  char unit = 'C';
-  if (settings.TemperatureUnit) {
-    t = t * 9 / 5 + 32;
-    unit = 'F';
-  }
-  snprintf(s_weather_buffer, sizeof(s_weather_buffer), "%d%c %s", t, unit, s_conditions_buffer);
-  text_layer_set_text(s_weather_layer, s_weather_buffer);
-}
-
 static void prv_apply_tick_subscription(void) {
   tick_timer_service_unsubscribe();
   tick_timer_service_subscribe(settings.PowerSaving ? MINUTE_UNIT : SECOND_UNIT, tick_handler);
 }
 
 static void prv_apply_settings(void) {
-  if (s_weather_layer) {
-    layer_set_hidden(text_layer_get_layer(s_weather_layer), !settings.ShowWeather);
-  }
-  prv_render_weather();
   prv_apply_tick_subscription();
   update_time();
   if (s_hands_layer) {
@@ -249,8 +252,12 @@ static void inbox_received_callback(DictionaryIterator *iter, void *context) {
     snprintf(s_conditions_buffer, sizeof(s_conditions_buffer), "%s", cond_t->value->cstring);
   }
   if (temp_t || cond_t) {
-    prv_render_weather();
   }
+
+  Tuple *sunrise_t = dict_find(iter, MESSAGE_KEY_SUNRISE);
+  if (sunrise_t) s_sunrise_min = (int)sunrise_t->value->int32;
+  Tuple *sunset_t = dict_find(iter, MESSAGE_KEY_SUNSET);
+  if (sunset_t) s_sunset_min = (int)sunset_t->value->int32;
 
   // Clay settings payload
   bool changed = false;
@@ -294,10 +301,38 @@ static void outbox_sent_callback(DictionaryIterator *iterator, void *context) {
   APP_LOG(APP_LOG_LEVEL_INFO, "Outbox send success!");
 }
 
+// --- rail markers ------------------------------------------------------
+// The printed labels already name states this watchface tracks, so lighting
+// them costs nothing and reads like the real watch's mode marker.
+static void marks_update_proc(Layer *layer, GContext *ctx) {
+  struct { int y; bool on; } marks[] = {
+    { LY_MARK_CHA,  s_charging },
+    { LY_MARK_ALM,  quiet_time_is_active() },
+    { LY_MARK_DATA, s_bt_connected },
+    { LY_MARK_PWRS, settings.PowerSaving },
+    { LY_MARK_IMPL, settings.TemperatureUnit },
+  };
+  // Coordinates are relative to the layer, whose top is LY_MARK_CHA - a
+  // layer's bounds always report origin (0,0), so subtract in design space.
+  graphics_context_set_fill_color(ctx, GColorWhite);
+  for (unsigned i = 0; i < ARRAY_LENGTH(marks); i++) {
+    if (!marks[i].on) continue;
+    int16_t y = sy(marks[i].y) - sy(LY_MARK_CHA);
+    graphics_fill_rect(ctx, GRect(0, y, sx(LY_MARK_W), sy(LY_MARK_H)), 0, GCornerNone);
+  }
+}
+
 // --- battery ----------------------------------------------------------
 static void battery_callback(BatteryChargeState state) {
   s_battery_level = state.charge_percent;
+  s_charging = state.is_charging || state.is_plugged;
   layer_mark_dirty(s_battery_layer);
+  if (s_marks_layer) layer_mark_dirty(s_marks_layer);
+}
+
+static void bluetooth_callback(bool connected) {
+  s_bt_connected = connected;
+  if (s_marks_layer) layer_mark_dirty(s_marks_layer);
 }
 
 static void battery_update_proc(Layer *layer, GContext *ctx) {
@@ -400,6 +435,46 @@ static void hands_update_proc(Layer *layer, GContext *ctx) {
   }
 }
 
+// --- rotating info box -------------------------------------------------
+// One box, three readings. Cycles every 4 seconds; in power-saving mode the
+// tick is a minute, so it simply advances once a minute instead.
+static void prv_update_info(struct tm *t) {
+  static char buf[12];
+  int slot = (t->tm_sec / 4) % 3;
+
+  // Skip a slot we have no data for, so the box never shows a blank.
+  for (int tries = 0; tries < 3; tries++) {
+    if (slot == 0) {
+#if defined(PBL_HEALTH)
+      HealthValue steps = health_service_sum_today(HealthMetricStepCount);
+      if (steps > 0) { snprintf(buf, sizeof(buf), "%d", (int)steps); break; }
+#endif
+    } else if (slot == 1) {
+      if (settings.ShowWeather && s_weather_valid) {
+        int v = s_weather_temp_c;
+        char u = 'C';
+        if (settings.TemperatureUnit) { v = v * 9 / 5 + 32; u = 'F'; }
+        snprintf(buf, sizeof(buf), "%d%c", v, u);
+        break;
+      }
+    } else {
+      // Show whichever of sunrise/sunset is still ahead today.
+      int now = t->tm_hour * 60 + t->tm_min;
+      int when = -1;
+      if (s_sunrise_min >= 0 && now < s_sunrise_min)      when = s_sunrise_min;
+      else if (s_sunset_min >= 0 && now < s_sunset_min)   when = s_sunset_min;
+      else if (s_sunrise_min >= 0)                        when = s_sunrise_min;
+      if (when >= 0) {
+        snprintf(buf, sizeof(buf), "%d:%02d", when / 60, when % 60);
+        break;
+      }
+    }
+    slot = (slot + 1) % 3;
+    if (tries == 2) buf[0] = '\0';
+  }
+  text_layer_set_text(s_info_layer, buf);
+}
+
 // --- time / date ---------------------------------------------------
 static void update_time(void) {
   time_t temp = time(NULL);
@@ -427,6 +502,8 @@ static void update_time(void) {
     strftime(sec_buffer, sizeof(sec_buffer), "%S", tick_time);
   }
   text_layer_set_text(s_sec_layer, sec_buffer);
+
+  prv_update_info(tick_time);
 
   // Lower band, as on the real watch: month large on the left, day-of-week
   // above day-of-month on the right. No year - neither the Seiko nor the
@@ -547,13 +624,6 @@ static void main_window_load(Window *window) {
   text_layer_set_text_alignment(s_dom_layer, GTextAlignmentRight);
   text_layer_set_text(s_dom_layer, "03");
 
-  s_weather_layer = text_layer_create(scaled_rect(LY_WEATHER_X, LY_WEATHER_Y, LY_WEATHER_W, LY_WEATHER_H));
-  text_layer_set_background_color(s_weather_layer, GColorClear);
-  text_layer_set_text_color(s_weather_layer, GColorWhite);
-  text_layer_set_font(s_weather_layer, s_letter_font);
-  text_layer_set_text_alignment(s_weather_layer, GTextAlignmentCenter);
-  text_layer_set_text(s_weather_layer, "");
-  layer_set_hidden(text_layer_get_layer(s_weather_layer), !settings.ShowWeather);
 
   layer_add_child(s_root_layer, text_layer_get_layer(s_sec_layer));
   layer_add_child(s_root_layer, text_layer_get_layer(s_time_layer));
@@ -561,15 +631,28 @@ static void main_window_load(Window *window) {
   layer_add_child(s_root_layer, text_layer_get_layer(s_date_layer));
   layer_add_child(s_root_layer, text_layer_get_layer(s_weekday_text_layer));
   layer_add_child(s_root_layer, text_layer_get_layer(s_dom_layer));
-  layer_add_child(s_root_layer, text_layer_get_layer(s_weather_layer));
 
-  // Battery meter - by the "BATTY" label on the right rail
+  // Rotating readout in the rail's one empty box
+  s_info_layer = text_layer_create(scaled_rect(LY_INFO_X, LY_INFO_Y, LY_INFO_W, LY_INFO_H));
+  text_layer_set_background_color(s_info_layer, GColorClear);
+  text_layer_set_text_color(s_info_layer, GColorBlack);
+  text_layer_set_font(s_info_layer, s_letter_font);
+  text_layer_set_text_alignment(s_info_layer, GTextAlignmentCenter);
+  text_layer_set_text(s_info_layer, "");
+  layer_add_child(s_root_layer, text_layer_get_layer(s_info_layer));
+
+  // Battery, on the printed yellow bar
   s_battery_layer = layer_create(scaled_rect(LY_BATT_X, LY_BATT_Y, LY_BATT_W, LY_BATT_H));
   layer_set_update_proc(s_battery_layer, battery_update_proc);
   layer_add_child(s_root_layer, s_battery_layer);
 
+  // Mode markers in the gutter beside the rail labels
+  s_marks_layer = layer_create(scaled_rect(LY_MARK_X, LY_MARK_CHA,
+                                           LY_MARK_W, LY_MARK_IMPL - LY_MARK_CHA + LY_MARK_H));
+  layer_set_update_proc(s_marks_layer, marks_update_proc);
+  layer_add_child(s_root_layer, s_marks_layer);
+
   update_time();
-  prv_render_weather();
 }
 
 static void main_window_unload(Window *window) {
@@ -579,7 +662,6 @@ static void main_window_unload(Window *window) {
   text_layer_destroy(s_date_layer);
   text_layer_destroy(s_weekday_text_layer);
   text_layer_destroy(s_dom_layer);
-  text_layer_destroy(s_weather_layer);
 
   fonts_unload_custom_font(s_time_font);
   fonts_unload_custom_font(s_time_mid_font);
@@ -589,7 +671,9 @@ static void main_window_unload(Window *window) {
   gbitmap_destroy(s_background_bitmap);
 
   layer_destroy(s_hands_layer);
+  text_layer_destroy(s_info_layer);
   layer_destroy(s_battery_layer);
+  layer_destroy(s_marks_layer);
   bitmap_layer_destroy(s_background_layer);
 }
 
@@ -609,6 +693,11 @@ static void init(void) {
 
   battery_state_service_subscribe(battery_callback);
   battery_callback(battery_state_service_peek());
+
+  connection_service_subscribe((ConnectionHandlers) {
+    .pebble_app_connection_handler = bluetooth_callback
+  });
+  bluetooth_callback(connection_service_peek_pebble_app_connection());
 
   app_message_register_inbox_received(inbox_received_callback);
   app_message_register_inbox_dropped(inbox_dropped_callback);

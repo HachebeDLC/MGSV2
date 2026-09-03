@@ -24,7 +24,8 @@
     },
     "capabilities": [
       "location",
-      "configurable"
+      "configurable",
+      "health"
     ],
     "messageKeys": [
       "TEMPERATURE",
@@ -33,7 +34,9 @@
       "PowerSaving",
       "TemperatureUnit",
       "ShowWeather",
-      "TimeFormat"
+      "TimeFormat",
+      "SUNRISE",
+      "SUNSET"
     ],
     "resources": {
       "media": [

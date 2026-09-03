@@ -29,26 +29,42 @@ function weatherCodeToCondition(code) {
   return '';
 }
 
-function sendWeather(tempC, conditions) {
+// "2026-09-03T07:15" -> minutes past midnight, or -1 if unparseable.
+function isoToMinutes(iso) {
+  var m = /T(\d{2}):(\d{2})/.exec(iso || '');
+  return m ? parseInt(m[1], 10) * 60 + parseInt(m[2], 10) : -1;
+}
+
+function sendPayload(payload) {
   Pebble.sendAppMessage(
-    { 'TEMPERATURE': tempC, 'CONDITIONS': conditions },
-    function () { console.log('Weather sent: ' + tempC + 'C ' + conditions); },
-    function (e) { console.log('Weather send failed: ' + JSON.stringify(e)); }
+    payload,
+    function () { console.log('Sent: ' + JSON.stringify(payload)); },
+    function (e) { console.log('Send failed: ' + JSON.stringify(e)); }
   );
 }
 
 function locationSuccess(pos) {
+  // Sunrise/sunset ride along on the same request - no extra round trip.
   var url = 'https://api.open-meteo.com/v1/forecast' +
     '?latitude=' + pos.coords.latitude +
     '&longitude=' + pos.coords.longitude +
-    '&current=temperature_2m,weather_code';
+    '&current=temperature_2m,weather_code' +
+    '&daily=sunrise,sunset&timezone=auto';
 
   xhrRequest(url, 'GET', function (responseText) {
     try {
       var json = JSON.parse(responseText);
-      var tempC = Math.round(json.current.temperature_2m);
-      var conditions = weatherCodeToCondition(json.current.weather_code);
-      sendWeather(tempC, conditions);
+      var payload = {
+        'TEMPERATURE': Math.round(json.current.temperature_2m),
+        'CONDITIONS': weatherCodeToCondition(json.current.weather_code)
+      };
+      if (json.daily && json.daily.sunrise && json.daily.sunrise[0]) {
+        var rise = isoToMinutes(json.daily.sunrise[0]);
+        var set = isoToMinutes(json.daily.sunset[0]);
+        if (rise >= 0) payload.SUNRISE = rise;
+        if (set >= 0) payload.SUNSET = set;
+      }
+      sendPayload(payload);
     } catch (err) {
       console.log('Weather parse error: ' + err);
     }
