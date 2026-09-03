@@ -29,10 +29,12 @@
 #if defined(PBL_PLATFORM_EMERY)
   #define RES_FONT_TIME    RESOURCE_ID_FONT_DIGIT_SEVEN_42
   #define RES_FONT_MID     RESOURCE_ID_FONT_DIGIT_SEVEN_35
+  #define RES_FONT_DATE    RESOURCE_ID_FONT_DIGIT_SEVEN_REG_24
   #define RES_FONT_LETTER  RESOURCE_ID_FONT_SMALL_PIXEL_21
 #else
   #define RES_FONT_TIME    RESOURCE_ID_FONT_DIGIT_SEVEN_30
   #define RES_FONT_MID     RESOURCE_ID_FONT_DIGIT_SEVEN_25
+  #define RES_FONT_DATE    RESOURCE_ID_FONT_DIGIT_SEVEN_REG_18
   #define RES_FONT_LETTER  RESOURCE_ID_FONT_SMALL_PIXEL_15
 #endif
 
@@ -70,6 +72,7 @@ static GBitmap *s_diamond_white_bitmap;
 
 static GFont s_time_font;
 static GFont s_time_mid_font;
+static GFont s_date_font;
 static GFont s_letter_font;
 
 static int s_battery_level;
@@ -271,8 +274,10 @@ static void update_time(void) {
   }
   text_layer_set_text(s_am_pm_layer, am_buffer);
 
+  // Day-of-month first so it stays visible even if the line is tight;
+  // 2-digit year keeps the whole string clear of the weekday label.
   static char date_buffer[16];
-  strftime(date_buffer, sizeof(date_buffer), "%Y %h %d", tick_time);
+  strftime(date_buffer, sizeof(date_buffer), "%d %h %y", tick_time);
   text_layer_set_text(s_date_layer, date_buffer);
 
   static char weekday_buffer[2];
@@ -335,6 +340,7 @@ static void main_window_load(Window *window) {
   // Fonts
   s_time_font = fonts_load_custom_font(resource_get_handle(RES_FONT_TIME));
   s_time_mid_font = fonts_load_custom_font(resource_get_handle(RES_FONT_MID));
+  s_date_font = fonts_load_custom_font(resource_get_handle(RES_FONT_DATE));
   s_letter_font = fonts_load_custom_font(resource_get_handle(RES_FONT_LETTER));
 
   // Text layers - same layout as the original 144x168 face, scaled.
@@ -362,9 +368,9 @@ static void main_window_load(Window *window) {
   s_date_layer = text_layer_create(scaled_rect(7, 120, 140, 30));
   text_layer_set_background_color(s_date_layer, GColorClear);
   text_layer_set_text_color(s_date_layer, GColorBlack);
-  text_layer_set_font(s_date_layer, s_time_font);
+  text_layer_set_font(s_date_layer, s_date_font);
   text_layer_set_text_alignment(s_date_layer, GTextAlignmentLeft);
-  text_layer_set_text(s_date_layer, "2026 sep 03");
+  text_layer_set_text(s_date_layer, "03 sep 26");
 
   s_weekday_text_layer = text_layer_create(scaled_rect(115, 100, 50, 30));
   text_layer_set_background_color(s_weekday_text_layer, GColorClear);
@@ -407,6 +413,7 @@ static void main_window_unload(Window *window) {
 
   fonts_unload_custom_font(s_time_font);
   fonts_unload_custom_font(s_time_mid_font);
+  fonts_unload_custom_font(s_date_font);
   fonts_unload_custom_font(s_letter_font);
 
   gbitmap_destroy(s_background_bitmap);
