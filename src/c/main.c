@@ -262,12 +262,9 @@ static void diamond_update_proc(Layer *layer, GContext *ctx) {
 static void hands_update_proc(Layer *layer, GContext *ctx) {
   GRect bounds = layer_get_bounds(layer);
   GPoint center = grect_center_point(&bounds);
-
-  // Short radial ticks on the OUTER edge of the dial (like the sunburst on
-  // the real watch), filling clockwise from 12 as the seconds advance -
-  // not full-length lines from the centre.
-  int32_t r_out = (bounds.size.w < bounds.size.h ? bounds.size.w : bounds.size.h) / 2;
-  int32_t r_in = r_out - (r_out / 5);
+  int32_t hw = bounds.size.w / 2;
+  int32_t hh = bounds.size.h / 2;
+  int32_t tick_len = (hw < hh ? hw : hh) / 8;   // short inward marks
 
   time_t now = time(NULL);
   struct tm *t = localtime(&now);
@@ -275,18 +272,30 @@ static void hands_update_proc(Layer *layer, GContext *ctx) {
   // Power-saving: draw the whole ring once; otherwise sweep up to "now".
   int last = settings.PowerSaving ? 60 : (t->tm_sec + 1);
 
+  // 60 ticks that hug the LCD's rounded-rectangle edge (following the watch
+  // frame, not a circle), filling clockwise from 12 as the seconds advance.
   graphics_context_set_stroke_color(ctx, GColorBlack);
   for (int i = 0; i < last; i++) {
     int32_t a = TRIG_MAX_ANGLE * i / 60;
-    int32_t s = sin_lookup(a);
-    int32_t c = cos_lookup(a);
+    int32_t dx = sin_lookup(a);          // unit ray, scaled by TRIG_MAX_RATIO
+    int32_t dy = -cos_lookup(a);
+    int32_t adx = dx < 0 ? -dx : dx;
+    int32_t ady = dy < 0 ? -dy : dy;
+
+    // px from centre to the rectangle edge along this ray
+    int32_t d = 0x7fffffff;
+    if (adx > 0) { int32_t e = hw * TRIG_MAX_RATIO / adx; if (e < d) d = e; }
+    if (ady > 0) { int32_t e = hh * TRIG_MAX_RATIO / ady; if (e < d) d = e; }
+    int32_t d_in = d - tick_len;
+    if (d_in < 0) d_in = 0;
+
     GPoint p_out = {
-      .x = center.x + (int16_t)(s * r_out / TRIG_MAX_RATIO),
-      .y = center.y - (int16_t)(c * r_out / TRIG_MAX_RATIO),
+      .x = center.x + (int16_t)(dx * d / TRIG_MAX_RATIO),
+      .y = center.y + (int16_t)(dy * d / TRIG_MAX_RATIO),
     };
     GPoint p_in = {
-      .x = center.x + (int16_t)(s * r_in / TRIG_MAX_RATIO),
-      .y = center.y - (int16_t)(c * r_in / TRIG_MAX_RATIO),
+      .x = center.x + (int16_t)(dx * d_in / TRIG_MAX_RATIO),
+      .y = center.y + (int16_t)(dy * d_in / TRIG_MAX_RATIO),
     };
     graphics_draw_line(ctx, p_in, p_out);
   }
@@ -376,7 +385,7 @@ static void main_window_load(Window *window) {
   s_diamond_layer = layer_create(scaled_rect(11, 16, 95, 95));
   layer_set_update_proc(s_diamond_layer, diamond_update_proc);
 
-  s_hands_layer = layer_create(scaled_rect(11, 16, 95, 95));
+  s_hands_layer = layer_create(scaled_rect(11, 16, 95, 132));
   layer_set_update_proc(s_hands_layer, hands_update_proc);
   layer_add_child(s_root_layer, s_hands_layer);
   layer_add_child(s_root_layer, s_diamond_layer);
