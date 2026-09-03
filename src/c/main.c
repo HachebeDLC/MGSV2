@@ -39,19 +39,18 @@
 #define LCD_CHAMFER    6
 #define RAIL_X         110
 #define RAIL_W         32
-#define RAIL_CHA       13
-#define RAIL_ALM       26
-#define RAIL_DATA      39
-#define RAIL_STEP      52
-#define RAIL_TEMP      65
-#define RAIL_SUN       78
-#define RAIL_SLOT_H    13
-#define BOX_Y          91
-#define BOX_H          12
-#define BAR_Y          105
+#define LAMP_CHA       13
+#define LAMP_ALM       22
+#define LAMP_DATA      31
+#define VAL_STEP_Y     48
+#define VAL_STEP_H     14
+#define VAL_TEMP_Y     72
+#define VAL_TEMP_H     14
+#define VAL_SUN_Y      96
+#define VAL_SUN_H      14
+#define BAR_Y          112
 #define BAR_H          4
 #define BAND_Y         133
-#define BAND_H         33
 #define EMBLEM_CX      54
 #define EMBLEM_CY      65
 #define EMBLEM_R       14
@@ -82,21 +81,17 @@
 #define LY_AMPM_W      12
 #define LY_AMPM_H      18
 
-// Rail: a caret in the strip just left of the boxes marks an active state.
+// Rail lamps: a caret in the strip just left of the three state boxes.
 #define LY_MARK_X      (RAIL_X - 4)
 #define LY_MARK_W      2
-#define LY_MARK_H      7
-#define LY_MARK_CHA    (RAIL_CHA + 3)
-#define LY_MARK_ALM    (RAIL_ALM + 3)
-#define LY_MARK_DATA   (RAIL_DATA + 3)
-#define LY_MARK_PWRS   (RAIL_STEP + 3)
-#define LY_MARK_IMPL   (RAIL_TEMP + 3)
+#define LY_MARK_H      5
+#define LY_MARK_CHA    (LAMP_CHA + 2)
+#define LY_MARK_ALM    (LAMP_ALM + 2)
+#define LY_MARK_DATA   (LAMP_DATA + 2)
 
-// Steps go in the rail's one free box; battery paints over the amber bar.
-#define LY_STEPS_X     (RAIL_X + 1)
-#define LY_STEPS_Y     (BOX_Y - 2)
-#define LY_STEPS_W     (RAIL_W - 2)
-#define LY_STEPS_H     (BOX_H + 4)
+// Readout values sit under their printed label, inside the same box.
+#define LY_VAL_X       (RAIL_X + 2)
+#define LY_VAL_W       (RAIL_W - 4)
 
 #define LY_BATT_X      (RAIL_X + 1)
 #define LY_BATT_Y      BAR_Y
@@ -129,11 +124,13 @@
   #define RES_FONT_MID     RESOURCE_ID_FONT_DIGIT_SEVEN_35
   #define RES_FONT_LETTER  RESOURCE_ID_FONT_SMALL_PIXEL_21
   #define RES_FONT_LABEL   RESOURCE_ID_FONT_SMALL_PIXEL_28
+  #define RES_FONT_TINY    RESOURCE_ID_FONT_SMALL_PIXEL_15
 #else
   #define RES_FONT_TIME    RESOURCE_ID_FONT_DIGIT_SEVEN_30
   #define RES_FONT_MID     RESOURCE_ID_FONT_DIGIT_SEVEN_25
   #define RES_FONT_LETTER  RESOURCE_ID_FONT_SMALL_PIXEL_15
   #define RES_FONT_LABEL   RESOURCE_ID_FONT_SMALL_PIXEL_20
+  #define RES_FONT_TINY    RESOURCE_ID_FONT_SMALL_PIXEL_15
 #endif
 
 // --- settings -------------------------------------------------------------
@@ -168,6 +165,7 @@ static GFont s_time_font;
 static GFont s_time_mid_font;
 static GFont s_letter_font;
 static GFont s_label_font;
+static GFont s_tiny_font;
 
 static int s_battery_level;
 static bool s_charging;
@@ -176,6 +174,8 @@ static int s_sunrise_min = -1;   // minutes past midnight, -1 = unknown
 static int s_sunset_min  = -1;
 static Layer *s_marks_layer;
 static TextLayer *s_steps_layer;
+static TextLayer *s_temp_layer;
+static TextLayer *s_sun_layer;
 
 // Last weather sample, kept in Celsius so we can re-render on a unit change
 // without hitting the network again.
@@ -299,8 +299,6 @@ static void marks_update_proc(Layer *layer, GContext *ctx) {
     { LY_MARK_CHA,  s_charging },
     { LY_MARK_ALM,  quiet_time_is_active() },
     { LY_MARK_DATA, s_bt_connected },
-    { LY_MARK_PWRS, settings.PowerSaving },
-    { LY_MARK_IMPL, settings.TemperatureUnit },
   };
   // Coordinates are relative to the layer, whose top is LY_MARK_CHA - a
   // layer's bounds always report origin (0,0), so subtract in design space.
@@ -433,7 +431,7 @@ static void hands_update_proc(Layer *layer, GContext *ctx) {
 // --- secondary readouts ------------------------------------------------
 // Each value has a fixed home, so none of them has to be waited for. A slot
 // with no data yet simply stays blank rather than showing a placeholder.
-static void prv_update_readouts(void) {
+static void prv_update_readouts(struct tm *t) {
   static char steps_buf[12];
   steps_buf[0] = '\0';
 #if defined(PBL_HEALTH)
@@ -441,6 +439,37 @@ static void prv_update_readouts(void) {
   if (steps > 0) snprintf(steps_buf, sizeof(steps_buf), "%d", (int)steps);
 #endif
   text_layer_set_text(s_steps_layer, steps_buf);
+
+  static char temp_buf[10];
+  temp_buf[0] = '\0';
+  if (settings.ShowWeather && s_weather_valid) {
+    int v = s_weather_temp_c;
+    char u = 'C';
+    if (settings.TemperatureUnit) { v = v * 9 / 5 + 32; u = 'F'; }
+    snprintf(temp_buf, sizeof(temp_buf), "%d%c", v, u);
+  }
+  text_layer_set_text(s_temp_layer, temp_buf);
+
+  // SUN reads the sky: the condition by day, and simply NIGHT once the sun
+  // is down - which is what the sunrise/sunset times are actually for here.
+  static char sun_buf[16];
+  sun_buf[0] = '\0';
+  int now = t->tm_hour * 60 + t->tm_min;
+  bool dark = (s_sunrise_min >= 0 && s_sunset_min >= 0) &&
+              (now < s_sunrise_min || now >= s_sunset_min);
+  if (dark) {
+    snprintf(sun_buf, sizeof(sun_buf), "NIGHT");
+  } else if (s_conditions_buffer[0]) {
+    // Uppercase to match the printed labels.
+    unsigned n = 0;
+    while (s_conditions_buffer[n] && n < sizeof(sun_buf) - 1) {
+      char ch = s_conditions_buffer[n];
+      sun_buf[n] = (ch >= 'a' && ch <= 'z') ? (char)(ch - ('a' - 'A')) : ch;
+      n++;
+    }
+    sun_buf[n] = '\0';
+  }
+  text_layer_set_text(s_sun_layer, sun_buf);
 }
 
 // --- time / date ---------------------------------------------------
@@ -471,7 +500,7 @@ static void update_time(void) {
   }
   text_layer_set_text(s_sec_layer, sec_buffer);
 
-  prv_update_readouts();
+  prv_update_readouts(tick_time);
 
   // Lower band, as on the real watch: month large on the left, day-of-week
   // above day-of-month on the right. No year - neither the Seiko nor the
@@ -544,6 +573,7 @@ static void main_window_load(Window *window) {
   s_time_mid_font = fonts_load_custom_font(resource_get_handle(RES_FONT_MID));
   s_letter_font = fonts_load_custom_font(resource_get_handle(RES_FONT_LETTER));
   s_label_font = fonts_load_custom_font(resource_get_handle(RES_FONT_LABEL));
+  s_tiny_font = fonts_load_custom_font(resource_get_handle(RES_FONT_TINY));
 
   // Running seconds - large, upper band
   s_sec_layer = text_layer_create(scaled_rect(LY_SEC_X, LY_SEC_Y, LY_SEC_W, LY_SEC_H));
@@ -600,14 +630,23 @@ static void main_window_load(Window *window) {
   layer_add_child(s_root_layer, text_layer_get_layer(s_weekday_text_layer));
   layer_add_child(s_root_layer, text_layer_get_layer(s_dom_layer));
 
-  // Steps, in the rail's one empty box
-  s_steps_layer = text_layer_create(scaled_rect(LY_STEPS_X, LY_STEPS_Y, LY_STEPS_W, LY_STEPS_H));
-  text_layer_set_background_color(s_steps_layer, GColorClear);
-  text_layer_set_text_color(s_steps_layer, GColorBlack);
-  text_layer_set_font(s_steps_layer, s_letter_font);
-  text_layer_set_text_alignment(s_steps_layer, GTextAlignmentCenter);
-  text_layer_set_text(s_steps_layer, "");
-  layer_add_child(s_root_layer, text_layer_get_layer(s_steps_layer));
+  // Rail readouts: each value under its own printed label
+  struct { TextLayer **layer; int y, h; } readouts[] = {
+    { &s_steps_layer, VAL_STEP_Y, VAL_STEP_H },
+    { &s_temp_layer,  VAL_TEMP_Y, VAL_TEMP_H },
+    { &s_sun_layer,   VAL_SUN_Y,  VAL_SUN_H  },
+  };
+  for (unsigned i = 0; i < ARRAY_LENGTH(readouts); i++) {
+    TextLayer *tl = text_layer_create(
+        scaled_rect(LY_VAL_X, readouts[i].y, LY_VAL_W, readouts[i].h));
+    text_layer_set_background_color(tl, GColorClear);
+    text_layer_set_text_color(tl, GColorBlack);
+    text_layer_set_font(tl, s_tiny_font);
+    text_layer_set_text_alignment(tl, GTextAlignmentCenter);
+    text_layer_set_text(tl, "");
+    layer_add_child(s_root_layer, text_layer_get_layer(tl));
+    *readouts[i].layer = tl;
+  }
 
 
   // Battery, on the printed yellow bar
@@ -617,7 +656,7 @@ static void main_window_load(Window *window) {
 
   // Mode markers in the gutter beside the rail labels
   s_marks_layer = layer_create(scaled_rect(LY_MARK_X, LY_MARK_CHA,
-                                           LY_MARK_W, LY_MARK_IMPL - LY_MARK_CHA + LY_MARK_H));
+                                           LY_MARK_W, LY_MARK_DATA - LY_MARK_CHA + LY_MARK_H));
   layer_set_update_proc(s_marks_layer, marks_update_proc);
   layer_add_child(s_root_layer, s_marks_layer);
 
@@ -636,12 +675,15 @@ static void main_window_unload(Window *window) {
   fonts_unload_custom_font(s_time_mid_font);
   fonts_unload_custom_font(s_letter_font);
   fonts_unload_custom_font(s_label_font);
+  fonts_unload_custom_font(s_tiny_font);
 
   gbitmap_destroy(s_background_bitmap);
 
   layer_destroy(s_hands_layer);
   text_layer_destroy(s_steps_layer);
   layer_destroy(s_battery_layer);
+  text_layer_destroy(s_temp_layer);
+  text_layer_destroy(s_sun_layer);
   layer_destroy(s_marks_layer);
   bitmap_layer_destroy(s_background_layer);
 }
