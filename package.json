@@ -29,7 +29,6 @@
     "resources": {
       "media": [
         { "type": "bitmap", "name": "IMAGE_BACKGROUND_MGSV", "file": "images/bgv2.2.png" },
-        { "type": "bitmap", "name": "IMAGE_DIAMOND", "file": "images/MGSV2DIAMOND.png" },
         { "type": "bitmap", "name": "IMAGE_JUST_THE_DIAMOND", "file": "images/MGSV2JUSTTHEDIAMOND.png" },
         { "type": "bitmap", "name": "IMAGE_ICON", "file": "images/icon.png", "menuIcon": true },
         { "type": "font", "name": "FONT_DIGIT_SEVEN_30", "file": "fonts/digital-7 (italic).ttf" },
