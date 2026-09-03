@@ -28,8 +28,8 @@
 // labels (CHA / ALM / DATA / PWR.S / IMP.L / BATTY) on the right rail.
 //
 // Fields are placed around the printed emblem, Seiko-style:
-//   day-of-month  above it, AM/PM left of it, day-of-week right of it,
-//   HH:MM below it, month in the lower band.
+//   seconds above it, AM/PM left of it, day-of-week right of it,
+//   HH:MM below it, full date in the lower band.
 // ---------------------------------------------------------------------------
 #define LCD_X          11
 #define LCD_Y          17
@@ -44,11 +44,13 @@
 #define RING_W         LCD_W
 #define RING_H         LCD_H
 
-// Readouts keep a ~5px margin from the LCD edge so the sweep never overlaps.
-#define LY_DOM_X       16
-#define LY_DOM_Y       22
-#define LY_DOM_W       84
-#define LY_DOM_H       26
+// Readouts keep a margin from the LCD edge so the sweep never overlaps them.
+// The emblem is printed at y 53..76, so the two free bands inside the LCD are
+// y 22..52 (seconds) and y 77..104 (time).
+#define LY_SEC_X       16
+#define LY_SEC_Y       22
+#define LY_SEC_W       84
+#define LY_SEC_H       28
 
 // AM/PM and day-of-week flank the printed emblem (y 53..76). Their height
 // must clear the letter font (21px on emery) or the glyphs get clipped.
@@ -62,10 +64,10 @@
 #define LY_DOW_W       20
 #define LY_DOW_H       19
 
-#define LY_TIME_X      14
-#define LY_TIME_Y      74
-#define LY_TIME_W      88
-#define LY_TIME_H      30
+#define LY_TIME_X      18
+#define LY_TIME_Y      77
+#define LY_TIME_W      80
+#define LY_TIME_H      28
 
 #define LY_DATE_X      8
 #define LY_DATE_Y      124
@@ -110,7 +112,7 @@ static Layer *s_root_layer;
 static GRect s_bounds;
 
 static TextLayer *s_time_layer;
-static TextLayer *s_dom_layer;
+static TextLayer *s_sec_layer;
 static TextLayer *s_am_pm_layer;
 static TextLayer *s_date_layer;
 static TextLayer *s_weekday_text_layer;
@@ -271,42 +273,52 @@ static void battery_update_proc(Layer *layer, GContext *ctx) {
 }
 
 // --- custom layers --------------------------------------------------
+//
+// The 60 second-marks are spaced evenly ALONG THE PERIMETER of the LCD, not
+// by angle. That is what makes them line up with the printed scale numbers:
+// projecting equal angles onto a rectangle bunches marks near the sides and
+// spreads them at the corners, which is why the ring looked off-centre.
+// Walking the perimeter puts mark 5 under the printed "5", mark 10 under
+// "10", mark 45 under "45", and so on (verified against the artwork).
+//
+// Each mark is a short segment perpendicular to its edge, pointing inward.
 static void hands_update_proc(Layer *layer, GContext *ctx) {
   GRect b = layer_get_bounds(layer);
-  int32_t cx = b.size.w / 2;
-  int32_t cy = b.size.h / 2;
-  int32_t hw = cx;
-  int32_t hh = cy;
-  if (hw < 4 || hh < 4) return;
+  int32_t w = b.size.w;
+  int32_t h = b.size.h;
+  if (w < 16 || h < 16) return;
 
-  int32_t len = (hw < hh ? hw : hh) / 15;   // short marks, inward
+  int32_t len = (w < h ? w : h) / 22;   // mark length, inward
   if (len < 3) len = 3;
+
+  int32_t half = w / 2;
+  int32_t perim = 2 * (w + h);
 
   time_t now = time(NULL);
   struct tm *t = localtime(&now);
-  int elapsed = t->tm_sec;   // 0..59
+  int last = settings.PowerSaving ? 60 : (t->tm_sec + 1);
 
-  // Only the elapsed marks are drawn - the arc grows clockwise from 12 over
-  // the minute, like the sweep on the real watch. Each mark is projected onto
-  // the LCD's rounded-rectangle perimeter so it follows the watch frame.
+  // 2px reads as a hairline on emery but is chunky on a 144x168 screen, where
+  // it would crowd the time underneath.
   graphics_context_set_stroke_color(ctx, GColorBlack);
-  graphics_context_set_stroke_width(ctx, 2);
-  int last = settings.PowerSaving ? 60 : (elapsed + 1);
+  graphics_context_set_stroke_width(ctx, w >= 120 ? 2 : 1);
   for (int i = 0; i < last; i++) {
-    int32_t a = (TRIG_MAX_ANGLE * i) / 60;
-    int32_t ux = sin_lookup(a);
-    int32_t uy = -cos_lookup(a);
-    int32_t axx = ux < 0 ? -ux : ux; if (axx < 1) axx = 1;
-    int32_t ayy = uy < 0 ? -uy : uy; if (ayy < 1) ayy = 1;
-    int32_t s1 = (hw * TRIG_MAX_RATIO) / axx;
-    int32_t s2 = (hh * TRIG_MAX_RATIO) / ayy;
-    int32_t s_out = s1 < s2 ? s1 : s2;
-    int32_t s_in = s_out - len;
-    if (s_in < 0) s_in = 0;
+    int32_t d = ((int32_t)i * perim) / 60;   // distance from top-centre, clockwise
+    int32_t ox, oy, ix, iy;
 
-    GPoint po = { cx + (ux * s_out) / TRIG_MAX_RATIO, cy + (uy * s_out) / TRIG_MAX_RATIO };
-    GPoint pi = { cx + (ux * s_in)  / TRIG_MAX_RATIO, cy + (uy * s_in)  / TRIG_MAX_RATIO };
-    graphics_draw_line(ctx, pi, po);
+    if (d <= half) {                       // top edge, centre -> right
+      ox = half + d;      oy = 0;          ix = ox;        iy = len;
+    } else if ((d -= half) <= h) {         // right edge, top -> bottom
+      ox = w - 1;         oy = d;          ix = w - 1 - len; iy = oy;
+    } else if ((d -= h) <= w) {            // bottom edge, right -> left
+      ox = w - d;         oy = h - 1;      ix = ox;        iy = h - 1 - len;
+    } else if ((d -= w) <= h) {            // left edge, bottom -> top
+      ox = 0;             oy = h - d;      ix = len;       iy = oy;
+    } else {                               // top edge, left -> centre
+      ox = d - h;         oy = 0;          ix = ox;        iy = len;
+    }
+
+    graphics_draw_line(ctx, GPoint(ix, iy), GPoint(ox, oy));
   }
 }
 
@@ -328,12 +340,17 @@ static void update_time(void) {
   }
   text_layer_set_text(s_am_pm_layer, am_buffer);
 
-  // Day-of-month on its own, big, at the top (like the real watch).
-  static char dom_buffer[3];
-  strftime(dom_buffer, sizeof(dom_buffer), "%d", tick_time);
-  text_layer_set_text(s_dom_layer, dom_buffer);
+  // Big running seconds in the upper band (the "22" on the in-game HUD).
+  // Blank in power-saving mode, where the watch only ticks once a minute.
+  static char sec_buffer[3];
+  if (settings.PowerSaving) {
+    sec_buffer[0] = '\0';
+  } else {
+    strftime(sec_buffer, sizeof(sec_buffer), "%S", tick_time);
+  }
+  text_layer_set_text(s_sec_layer, sec_buffer);
 
-  // Uppercase abbreviated month, big, at the bottom (the "MAR" slot).
+  // Full date in the lower band: uppercase month + day-of-month, "SEP 03".
   static char mon_buffer[6];
   strftime(mon_buffer, sizeof(mon_buffer), "%b", tick_time);
   for (char *p = mon_buffer; *p; p++) {
@@ -341,7 +358,9 @@ static void update_time(void) {
       *p = (char)(*p - ('a' - 'A'));
     }
   }
-  text_layer_set_text(s_date_layer, mon_buffer);
+  static char date_buffer[16];
+  snprintf(date_buffer, sizeof(date_buffer), "%s %02d", mon_buffer, tick_time->tm_mday);
+  text_layer_set_text(s_date_layer, date_buffer);
 
   static char weekday_buffer[2];
   strftime(weekday_buffer, sizeof(weekday_buffer), "%u", tick_time);
@@ -396,13 +415,13 @@ static void main_window_load(Window *window) {
   s_time_mid_font = fonts_load_custom_font(resource_get_handle(RES_FONT_MID));
   s_letter_font = fonts_load_custom_font(resource_get_handle(RES_FONT_LETTER));
 
-  // Day-of-month - large, top-centre
-  s_dom_layer = text_layer_create(scaled_rect(LY_DOM_X, LY_DOM_Y, LY_DOM_W, LY_DOM_H));
-  text_layer_set_background_color(s_dom_layer, GColorClear);
-  text_layer_set_text_color(s_dom_layer, GColorBlack);
-  text_layer_set_font(s_dom_layer, s_time_mid_font);
-  text_layer_set_text_alignment(s_dom_layer, GTextAlignmentCenter);
-  text_layer_set_text(s_dom_layer, "03");
+  // Running seconds - large, upper band
+  s_sec_layer = text_layer_create(scaled_rect(LY_SEC_X, LY_SEC_Y, LY_SEC_W, LY_SEC_H));
+  text_layer_set_background_color(s_sec_layer, GColorClear);
+  text_layer_set_text_color(s_sec_layer, GColorBlack);
+  text_layer_set_font(s_sec_layer, s_time_mid_font);
+  text_layer_set_text_alignment(s_sec_layer, GTextAlignmentCenter);
+  text_layer_set_text(s_sec_layer, "00");
 
   // HH:MM - centred
   s_time_layer = text_layer_create(scaled_rect(LY_TIME_X, LY_TIME_Y, LY_TIME_W, LY_TIME_H));
@@ -419,13 +438,13 @@ static void main_window_load(Window *window) {
   text_layer_set_text_alignment(s_am_pm_layer, GTextAlignmentLeft);
   text_layer_set_text(s_am_pm_layer, "AM");
 
-  // Month - large, bottom-centre (the "MAR" slot)
+  // Full date - large, lower band
   s_date_layer = text_layer_create(scaled_rect(LY_DATE_X, LY_DATE_Y, LY_DATE_W, LY_DATE_H));
   text_layer_set_background_color(s_date_layer, GColorClear);
   text_layer_set_text_color(s_date_layer, GColorBlack);
   text_layer_set_font(s_date_layer, s_time_mid_font);
   text_layer_set_text_alignment(s_date_layer, GTextAlignmentCenter);
-  text_layer_set_text(s_date_layer, "MAR");
+  text_layer_set_text(s_date_layer, "SEP 03");
 
   // Day-of-week - small, right of the time
   s_weekday_text_layer = text_layer_create(scaled_rect(LY_DOW_X, LY_DOW_Y, LY_DOW_W, LY_DOW_H));
@@ -443,7 +462,7 @@ static void main_window_load(Window *window) {
   text_layer_set_text(s_weather_layer, "");
   layer_set_hidden(text_layer_get_layer(s_weather_layer), !settings.ShowWeather);
 
-  layer_add_child(s_root_layer, text_layer_get_layer(s_dom_layer));
+  layer_add_child(s_root_layer, text_layer_get_layer(s_sec_layer));
   layer_add_child(s_root_layer, text_layer_get_layer(s_time_layer));
   layer_add_child(s_root_layer, text_layer_get_layer(s_am_pm_layer));
   layer_add_child(s_root_layer, text_layer_get_layer(s_date_layer));
@@ -461,7 +480,7 @@ static void main_window_load(Window *window) {
 
 static void main_window_unload(Window *window) {
   text_layer_destroy(s_time_layer);
-  text_layer_destroy(s_dom_layer);
+  text_layer_destroy(s_sec_layer);
   text_layer_destroy(s_am_pm_layer);
   text_layer_destroy(s_date_layer);
   text_layer_destroy(s_weekday_text_layer);
