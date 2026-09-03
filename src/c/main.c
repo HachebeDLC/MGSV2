@@ -302,7 +302,7 @@ static void marks_update_proc(Layer *layer, GContext *ctx) {
   };
   // Coordinates are relative to the layer, whose top is LY_MARK_CHA - a
   // layer's bounds always report origin (0,0), so subtract in design space.
-  graphics_context_set_fill_color(ctx, GColorBlack);
+  graphics_context_set_fill_color(ctx, GColorWhite);
   for (unsigned i = 0; i < ARRAY_LENGTH(marks); i++) {
     if (!marks[i].on) continue;
     int16_t y = sy(marks[i].y) - sy(LY_MARK_CHA);
@@ -551,7 +551,7 @@ static void main_window_load(Window *window) {
   s_root_layer = window_get_root_layer(window);
   s_bounds = layer_get_bounds(s_root_layer);
 
-  window_set_background_color(window, GColorWhite);
+  window_set_background_color(window, GColorBlack);
 
   // Background (bgv2.2.png, or bgv2.2~emery.png on Pebble Time 2)
   s_background_bitmap = gbitmap_create_with_resource(RESOURCE_ID_IMAGE_BACKGROUND_MGSV);

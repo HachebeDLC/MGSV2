@@ -120,14 +120,14 @@ def draw_scale(d, box, chamfer, font, W):
         n = max(1.0, (vx * vx + vy * vy) ** 0.5)
         ox, oy = px + vx / n * gap, py + vy / n * gap
         if i % 5:
-            d.rectangle([ox - dot, oy - dot, ox + dot, oy + dot], fill=BLACK)
+            d.rectangle([ox - dot, oy - dot, ox + dot, oy + dot], fill=PANEL)
         else:
             label = "60" if i == 0 else str(i)
             tb = font.getbbox(label)
             tw, th = tb[2] - tb[0], tb[3] - tb[1]
             lx, ly = px + vx / n * (gap + 2), py + vy / n * (gap + 2)
             d.text((lx - tw / 2 - tb[0], ly - th / 2 - tb[1]), label,
-                   font=font, fill=BLACK)
+                   font=font, fill=PANEL)
 
 
 def draw_emblem(d, cx, cy, r):
@@ -141,28 +141,29 @@ def draw_emblem(d, cx, cy, r):
 
 
 def build(W, H, path):
-    # The panel itself is the light surface: on the real watch everything dark
-    # is a printed mark or a lit segment on that surface, so the background
-    # starts white and the artwork is drawn onto it.
-    im = Image.new("RGB", (W, H), PANEL)
+    # The panel is not one flat surface. Profiling the reference photo shows
+    # light areas - the time window, the lower band, the rail's boxes - set
+    # into dark bands, and the seconds scale is printed light-on-dark in the
+    # band that rings the window. So the field starts dark and the lit areas
+    # are placed on it.
+    im = Image.new("RGB", (W, H), BLACK)
     d = ImageDraw.Draw(im)
 
     # --- proportions, taken from the reference photo -----------------------
     rail_w = int(W * 0.24)                  # right rail
-    scale_w = max(13, int(W * 0.088))       # seconds scale gutter
+    scale_w = max(13, int(W * 0.088))       # dark band carrying the scale
     band_h = int(H * 0.215)                 # lower band
     scale_h = max(13, int(H * 0.075))
 
     lcd = (scale_w, scale_h,
            W - rail_w - scale_w - 1, H - band_h - scale_h - 1)
     chamfer = max(4, W // 22)
-    rule = max(2, W // 70)                  # printed line weight
 
     label_font = scale_font(FONT_LABEL, max(5, H // 34), "CHA")
     scale_font_ = scale_font(FONT_LABEL, max(4, H // 40), "60")
 
-    # --- the time window: an outlined octagon, not a filled one ------------
-    draw_octagon(d, lcd, chamfer, outline=BLACK, width=rule)
+    # --- the time window, lit, with its scale on the dark band around it ---
+    draw_octagon(d, lcd, chamfer, fill=PANEL)
     draw_scale(d, lcd, chamfer, scale_font_, W)
 
     cx, cy = (lcd[0] + lcd[2]) // 2, (lcd[1] + lcd[3]) // 2
@@ -175,7 +176,6 @@ def build(W, H, path):
     avail = bottom - top
     bar_h = max(4, avail // 22)
     gap = max(1, avail // 90)
-    # three lamps, three readouts, one bar
     lamp_h = int(avail * 0.085)
     read_h = (avail - 3 * lamp_h - bar_h - 7 * gap) // 3
 
@@ -183,7 +183,7 @@ def build(W, H, path):
     y = top
     lamps = {}
     for name in LAMPS:
-        d.rectangle([rx0, y, rx1, y + lamp_h], outline=BLACK, width=1)
+        d.rectangle([rx0, y, rx1, y + lamp_h], fill=PANEL)
         tb = small.getbbox(name)
         d.text((rx0 + 3 - tb[0], y + (lamp_h - (tb[3] - tb[1])) / 2 - tb[1]),
                name, font=small, fill=BLACK)
@@ -192,21 +192,19 @@ def build(W, H, path):
 
     reads = {}
     for name in READOUTS:
-        d.rectangle([rx0, y, rx1, y + read_h], outline=BLACK, width=1)
+        d.rectangle([rx0, y, rx1, y + read_h], fill=PANEL)
         tb = small.getbbox(name)
         d.text((rx0 + 3 - tb[0], y + 2 - tb[1]), name, font=small, fill=BLACK)
-        # value sits under the label, inside the same box
         reads[name] = (y + (tb[3] - tb[1]) + 4, y + read_h - 1)
         y += read_h + gap
 
     bar_y0 = y
     bar_y1 = min(bottom, y + bar_h)
-    d.rectangle([rx0, bar_y0, rx1, bar_y1], fill=AMBER, outline=BLACK, width=1)
+    d.rectangle([rx0, bar_y0, rx1, bar_y1], fill=AMBER)
 
-    # --- lower band ---------------------------------------------------------
-    # Continuous with the panel on the real watch; only a rule separates it.
+    # --- lower band: a lit area, like the window -------------------------
     band_top = lcd[3] + scale_h + 2
-    d.line([(2, band_top), (W - 3, band_top)], fill=BLACK, width=rule)
+    draw_octagon(d, (1, band_top, W - 2, H - 2), chamfer, fill=PANEL)
 
     # PIL antialiases text and polygon edges, which on a 64-colour screen
     # shows up as muddy fringes and on 1-bit aplite as dithering. Snap every
