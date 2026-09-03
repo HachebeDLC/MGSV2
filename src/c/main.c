@@ -307,6 +307,15 @@ static void battery_update_proc(Layer *layer, GContext *ctx) {
   graphics_fill_rect(ctx, GRect(0, 0, width, bounds.size.h), 0, GCornerNone);
 }
 
+// Integer square root (Newton). Used to aim each second-mark at the LCD
+// centre without pulling in floating point.
+static int32_t isqrt32(int32_t n) {
+  if (n <= 0) return 0;
+  int32_t x = n, y = (x + 1) / 2;
+  while (y < x) { x = y; y = (x + n / x) / 2; }
+  return x;
+}
+
 // --- custom layers --------------------------------------------------
 //
 // The 60 second-marks are spaced evenly ALONG THE PERIMETER of the LCD, not
@@ -321,7 +330,11 @@ static void battery_update_proc(Layer *layer, GContext *ctx) {
 // Following that keeps the marks on the artwork's own outline, and lets them
 // pivot through 45 degrees at each corner instead of jumping 90.
 //
-// Each mark is a short segment normal to the path, pointing inward.
+// Each mark POINTS AT THE CENTRE, it is not normal to its edge. On the real
+// watch the top row starts vertical under the printed "60" and leans further
+// with every step toward the corner - a fan, not a comb. The Watchy MGSV
+// sprites are drawn the same way. Position comes from the perimeter walk (so
+// the marks stay on the printed scale); direction comes from the centre.
 static void hands_update_proc(Layer *layer, GContext *ctx) {
   GRect b = layer_get_bounds(layer);
   int32_t w = b.size.w - 1;
@@ -334,10 +347,8 @@ static void hands_update_proc(Layer *layer, GContext *ctx) {
   if (len < 3) len = 3;
   if (c < 2) c = 2;
 
-  // A chamfer of leg c is c*sqrt(2) long; the inward normal is at 45 degrees,
-  // so a mark of length len steps len/sqrt(2) on each axis. 707/1000 ~ 1/sqrt2.
+  // A chamfer of leg c is c*sqrt(2) long.
   int32_t diag = (c * 1414) / 1000;
-  int32_t dl   = (len * 707) / 1000;
   int32_t run_x = w - 2 * c;
   int32_t run_y = h - 2 * c;
   int32_t half  = run_x / 2;
@@ -352,33 +363,38 @@ static void hands_update_proc(Layer *layer, GContext *ctx) {
   graphics_context_set_stroke_color(ctx, GColorBlack);
   graphics_context_set_stroke_width(ctx, b.size.w >= 120 ? 2 : 1);
 
+  int32_t cx = w / 2, cy = h / 2;
+
   for (int i = 0; i < last; i++) {
     int32_t d = ((int32_t)i * perim) / 60;   // walked clockwise from top centre
-    int32_t ox, oy, ix, iy, k;
+    int32_t ox, oy, k;
 
     if (d < half) {                                 // top edge, centre -> right
-      ox = w / 2 + d;   oy = 0;         ix = ox;        iy = len;
+      ox = w / 2 + d;   oy = 0;
     } else if ((d -= half) < diag) {                // top-right chamfer
-      k = (d * c) / diag;
-      ox = w - c + k;   oy = k;         ix = ox - dl;   iy = oy + dl;
+      k = (d * c) / diag;  ox = w - c + k;   oy = k;
     } else if ((d -= diag) < run_y) {               // right edge, down
-      ox = w;           oy = c + d;     ix = w - len;   iy = oy;
+      ox = w;           oy = c + d;
     } else if ((d -= run_y) < diag) {               // bottom-right chamfer
-      k = (d * c) / diag;
-      ox = w - k;       oy = h - c + k; ix = ox - dl;   iy = oy - dl;
+      k = (d * c) / diag;  ox = w - k;       oy = h - c + k;
     } else if ((d -= diag) < run_x) {               // bottom edge, right -> left
-      ox = w - c - d;   oy = h;         ix = ox;        iy = h - len;
+      ox = w - c - d;   oy = h;
     } else if ((d -= run_x) < diag) {               // bottom-left chamfer
-      k = (d * c) / diag;
-      ox = c - k;       oy = h - k;     ix = ox + dl;   iy = oy - dl;
+      k = (d * c) / diag;  ox = c - k;       oy = h - k;
     } else if ((d -= diag) < run_y) {               // left edge, up
-      ox = 0;           oy = h - c - d; ix = len;       iy = oy;
+      ox = 0;           oy = h - c - d;
     } else if ((d -= run_y) < diag) {               // top-left chamfer
-      k = (d * c) / diag;
-      ox = k;           oy = c - k;     ix = ox + dl;   iy = oy + dl;
+      k = (d * c) / diag;  ox = k;           oy = c - k;
     } else {                                        // top edge, left -> centre
-      ox = c + (d - diag);  oy = 0;     ix = ox;        iy = len;
+      ox = c + (d - diag);  oy = 0;
     }
+
+    // Step `len` from the rim toward the centre.
+    int32_t vx = cx - ox, vy = cy - oy;
+    int32_t dist = isqrt32(vx * vx + vy * vy);
+    if (dist < 1) dist = 1;
+    int32_t ix = ox + (vx * len) / dist;
+    int32_t iy = oy + (vy * len) / dist;
 
     graphics_draw_line(ctx, GPoint(ix, iy), GPoint(ox, oy));
   }
