@@ -44,23 +44,24 @@
 #define RING_W         LCD_W
 #define RING_H         LCD_H
 
-// Readouts keep a margin from the LCD edge so the sweep never overlaps them.
-// The emblem is printed at y 53..76, so the two free bands inside the LCD are
-// y 22..52 (seconds) and y 77..104 (time).
-#define LY_SEC_X       16
-#define LY_SEC_Y       22
-#define LY_SEC_W       84
+// The sweep marks are 1/14 of the LCD (measured off the 2200px photo), so
+// they occupy roughly 7px of the design canvas along each edge. Readouts stay
+// clear of that band. With the emblem printed at y 53..76, the two usable
+// strips inside the LCD are y 24..52 (seconds) and y 77..103 (time).
+//
+// Seconds sit right of the axis, as on the real watch - not centred.
+#define LY_SEC_X       19
+#define LY_SEC_Y       24
+#define LY_SEC_W       73
 #define LY_SEC_H       28
 
-// AM/PM sits left of the printed emblem (x 48..70, y 53..76), in the gap
-// between it and the sweep marks (which reach x 15). Its height must clear
-// the label font or the glyphs get clipped. Nothing goes to the emblem's
-// right: on the real watch that side of the LCD is empty, the CHA/DATA/TMR/
-// ALM/TIME rail being outside the glass.
+// AM/PM sits left of the TIME digits and level with them (the real watch puts
+// it beside the hour, not beside the emblem). The time is centre-aligned and
+// never fills its box, so this tucks into the slack on its left.
 #define LY_AMPM_X      17
-#define LY_AMPM_Y      52
-#define LY_AMPM_W      29
-#define LY_AMPM_H      25
+#define LY_AMPM_Y      74
+#define LY_AMPM_W      16
+#define LY_AMPM_H      19
 
 // Lower band, laid out like the real watch: month large on the left, then
 // day-of-week stacked above day-of-month on the right ("DEC" / "MO" / "6").
@@ -76,10 +77,13 @@
 #define LY_DOM_W       40
 #define LY_DOM_H       30
 
+// The box starts above the emblem on purpose: a TextLayer reserves the font's
+// empty ascender at the top, so the glyphs land ~8px lower than the box does.
+// Measured on the reference, the digits centre at 74% of the LCD height.
 #define LY_TIME_X      18
-#define LY_TIME_Y      77
+#define LY_TIME_Y      70
 #define LY_TIME_W      80
-#define LY_TIME_H      28
+#define LY_TIME_H      34
 
 #define LY_DATE_X      6
 #define LY_DATE_Y      122
@@ -304,7 +308,7 @@ static void hands_update_proc(Layer *layer, GContext *ctx) {
   int32_t h = b.size.h;
   if (w < 16 || h < 16) return;
 
-  int32_t len = (w < h ? w : h) / 22;   // mark length, inward
+  int32_t len = (w < h ? w : h) / 14;   // measured off the reference photo
   if (len < 3) len = 3;
 
   int32_t half = w / 2;
@@ -443,14 +447,14 @@ static void main_window_load(Window *window) {
   text_layer_set_background_color(s_sec_layer, GColorClear);
   text_layer_set_text_color(s_sec_layer, GColorBlack);
   text_layer_set_font(s_sec_layer, s_time_mid_font);
-  text_layer_set_text_alignment(s_sec_layer, GTextAlignmentCenter);
+  text_layer_set_text_alignment(s_sec_layer, GTextAlignmentRight);
   text_layer_set_text(s_sec_layer, "00");
 
   // HH:MM - centred
   s_time_layer = text_layer_create(scaled_rect(LY_TIME_X, LY_TIME_Y, LY_TIME_W, LY_TIME_H));
   text_layer_set_background_color(s_time_layer, GColorClear);
   text_layer_set_text_color(s_time_layer, GColorBlack);
-  text_layer_set_font(s_time_layer, s_time_font);
+  text_layer_set_font(s_time_layer, s_time_mid_font);
   text_layer_set_text_alignment(s_time_layer, GTextAlignmentCenter);
   text_layer_set_text(s_time_layer, "00:00");
 
