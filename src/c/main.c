@@ -26,30 +26,30 @@
 //   - small day-of-week in the top-left
 // Tweak these if anything clips or overlaps the printed bezel art.
 // ---------------------------------------------------------------------------
-#define LY_SEC_X       52
-#define LY_SEC_Y       20
-#define LY_SEC_W       48
-#define LY_SEC_H       34
+#define LY_SEC_X       64
+#define LY_SEC_Y       13
+#define LY_SEC_W       44
+#define LY_SEC_H       36
 
 #define LY_DOW_X       10
-#define LY_DOW_Y       21
+#define LY_DOW_Y       14
 #define LY_DOW_W       34
 #define LY_DOW_H       14
 
 #define LY_TIME_X      6
-#define LY_TIME_Y      58
+#define LY_TIME_Y      66
 #define LY_TIME_W      102
 #define LY_TIME_H      48
 
 #define LY_AMPM_X      8
-#define LY_AMPM_Y      50
+#define LY_AMPM_Y      56
 #define LY_AMPM_W      20
 #define LY_AMPM_H      12
 
-#define LY_DATE_X      2
-#define LY_DATE_Y      104
-#define LY_DATE_W      112
-#define LY_DATE_H      32
+#define LY_DATE_X      6
+#define LY_DATE_Y      108
+#define LY_DATE_W      104
+#define LY_DATE_H      30
 
 #define LY_WEATHER_X   6
 #define LY_WEATHER_Y   1
@@ -95,12 +95,15 @@ static TextLayer *s_date_layer;
 static TextLayer *s_weekday_text_layer;
 static TextLayer *s_weather_layer;
 
+static Layer *s_hands_layer;
+static Layer *s_diamond_layer;
 static Layer *s_battery_layer;
 
 static BitmapLayer *s_background_layer;
 static GBitmap *s_background_bitmap;
 static BitmapLayer *s_just_diamond_layer;
 static GBitmap *s_just_diamond_bitmap;
+static GBitmap *s_diamond_white_bitmap;
 
 static GFont s_time_font;
 static GFont s_time_mid_font;
@@ -174,6 +177,9 @@ static void prv_apply_settings(void) {
   prv_render_weather();
   prv_apply_tick_subscription();
   update_time();
+  if (s_hands_layer) {
+    layer_mark_dirty(s_hands_layer);
+  }
 }
 
 // --- AppMessage --------------------------------------------------------
@@ -247,6 +253,35 @@ static void battery_update_proc(Layer *layer, GContext *ctx) {
   graphics_fill_rect(ctx, GRect(0, 0, width, bounds.size.h), 0, GCornerNone);
 }
 
+// --- custom layers --------------------------------------------------
+static void diamond_update_proc(Layer *layer, GContext *ctx) {
+  graphics_context_set_compositing_mode(ctx, GCompOpOr);
+  graphics_draw_bitmap_in_rect(ctx, s_diamond_white_bitmap, layer_get_bounds(layer));
+}
+
+static void hands_update_proc(Layer *layer, GContext *ctx) {
+  GRect bounds = layer_get_bounds(layer);
+  GPoint center = grect_center_point(&bounds);
+  int16_t second_hand_length = bounds.size.w / 1.5;
+
+  time_t now = time(NULL);
+  struct tm *t = localtime(&now);
+
+  // In power-saving mode draw the full ring once; otherwise sweep up to the
+  // current second so the ring "fills" over a minute.
+  int last = settings.PowerSaving ? 60 : (t->tm_sec + 1);
+
+  graphics_context_set_stroke_color(ctx, GColorBlack);
+  for (int i = 0; i < last; i++) {
+    int32_t second_angle = TRIG_MAX_ANGLE * i / 60;
+    GPoint second_hand = {
+      .x = (int16_t)(sin_lookup(second_angle) * (int32_t)second_hand_length / TRIG_MAX_RATIO) + center.x,
+      .y = (int16_t)(-cos_lookup(second_angle) * (int32_t)second_hand_length / TRIG_MAX_RATIO) + center.y,
+    };
+    graphics_draw_line(ctx, second_hand, center);
+  }
+}
+
 // --- time / date ---------------------------------------------------
 static void update_time(void) {
   time_t temp = time(NULL);
@@ -298,6 +333,10 @@ static void update_time(void) {
 static void tick_handler(struct tm *tick_time, TimeUnits units_changed) {
   update_time();
 
+  if (!settings.PowerSaving) {
+    layer_mark_dirty(s_hands_layer);
+  }
+
   // Ask the phone for fresh weather every 30 minutes (once, on the boundary).
   if (tick_time->tm_min % 30 == 0 && tick_time->tm_sec == 0) {
     DictionaryIterator *iter;
@@ -321,6 +360,16 @@ static void main_window_load(Window *window) {
   bitmap_layer_set_bitmap(s_background_layer, s_background_bitmap);
   bitmap_layer_set_alignment(s_background_layer, GAlignCenter);
   layer_add_child(s_root_layer, bitmap_layer_get_layer(s_background_layer));
+
+  // White diamond outline + animated seconds ring (share the same frame)
+  s_diamond_white_bitmap = gbitmap_create_with_resource(RESOURCE_ID_IMAGE_DIAMOND);
+  s_diamond_layer = layer_create(scaled_rect(11, 16, 95, 95));
+  layer_set_update_proc(s_diamond_layer, diamond_update_proc);
+
+  s_hands_layer = layer_create(scaled_rect(11, 16, 95, 95));
+  layer_set_update_proc(s_hands_layer, hands_update_proc);
+  layer_add_child(s_root_layer, s_hands_layer);
+  layer_add_child(s_root_layer, s_diamond_layer);
 
   // Small centre diamond
   s_just_diamond_bitmap = gbitmap_create_with_resource(RESOURCE_ID_IMAGE_JUST_THE_DIAMOND);
@@ -410,8 +459,11 @@ static void main_window_unload(Window *window) {
   fonts_unload_custom_font(s_letter_font);
 
   gbitmap_destroy(s_background_bitmap);
+  gbitmap_destroy(s_diamond_white_bitmap);
   gbitmap_destroy(s_just_diamond_bitmap);
 
+  layer_destroy(s_hands_layer);
+  layer_destroy(s_diamond_layer);
   layer_destroy(s_battery_layer);
   bitmap_layer_destroy(s_background_layer);
   bitmap_layer_destroy(s_just_diamond_layer);
