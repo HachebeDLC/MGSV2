@@ -105,30 +105,22 @@
 
 // Lower band: month and day grouped right (as on the real watch), weather and
 // sun times in the free left block.
-#define LY_DATE_X      52
-#define LY_DATE_Y      (BAND_Y + 1)
+#define LY_DATE_X      48
+#define LY_DATE_Y      (BAND_Y + 2)
 #define LY_DATE_W      52
-#define LY_DATE_H      32
+#define LY_DATE_H      30
 
-#define LY_DOW_X       104
-#define LY_DOW_Y       (BAND_Y - 6)
+#define LY_DOW_X       102
+#define LY_DOW_Y       (BAND_Y - 3)
 #define LY_DOW_W       36
-#define LY_DOW_H       20
+#define LY_DOW_H       18
 
-#define LY_DOM_X       100
-#define LY_DOM_Y       (BAND_Y + 9)
+#define LY_DOM_X       98
+#define LY_DOM_Y       (BAND_Y + 7)
 #define LY_DOM_W       40
-#define LY_DOM_H       26
+#define LY_DOM_H       25
 
-#define LY_TEMP_X      6
-#define LY_TEMP_Y      (BAND_Y + 2)
-#define LY_TEMP_W      46
-#define LY_TEMP_H      16
 
-#define LY_SUN_X       6
-#define LY_SUN_Y       (BAND_Y + 17)
-#define LY_SUN_W       46
-#define LY_SUN_H       16
 
 // Platform-scaled fonts. The "~emery" project fonts are only bundled for
 // emery (see package.json), so guard their use.
@@ -184,8 +176,6 @@ static int s_sunrise_min = -1;   // minutes past midnight, -1 = unknown
 static int s_sunset_min  = -1;
 static Layer *s_marks_layer;
 static TextLayer *s_steps_layer;
-static TextLayer *s_temp_layer;
-static TextLayer *s_sun_layer;
 
 // Last weather sample, kept in Celsius so we can re-render on a unit change
 // without hitting the network again.
@@ -314,7 +304,7 @@ static void marks_update_proc(Layer *layer, GContext *ctx) {
   };
   // Coordinates are relative to the layer, whose top is LY_MARK_CHA - a
   // layer's bounds always report origin (0,0), so subtract in design space.
-  graphics_context_set_fill_color(ctx, GColorWhite);
+  graphics_context_set_fill_color(ctx, GColorBlack);
   for (unsigned i = 0; i < ARRAY_LENGTH(marks); i++) {
     if (!marks[i].on) continue;
     int16_t y = sy(marks[i].y) - sy(LY_MARK_CHA);
@@ -348,7 +338,9 @@ static int32_t isqrt32(int32_t n) {
   if (n <= 0) return 0;
   int32_t x = n, y = (x + 1) / 2;
   while (y < x) { x = y; y = (x + n / x) / 2; }
-  return x;
+  // Round rather than truncate: a short root inflates the step below, which
+  // made the marks come out uneven (7.1 to 9.2px for a nominal 8).
+  return (n - x * x) < ((x + 1) * (x + 1) - n) ? x : x + 1;
 }
 
 // --- custom layers --------------------------------------------------
@@ -425,12 +417,14 @@ static void hands_update_proc(Layer *layer, GContext *ctx) {
       ox = c + (d - diag);  oy = 0;
     }
 
-    // Step `len` from the rim toward the centre.
+    // Step `len` from the rim toward the centre, in Q8 so the rounding does
+    // not vary the mark length from one position to the next.
     int32_t vx = cx - ox, vy = cy - oy;
     int32_t dist = isqrt32(vx * vx + vy * vy);
     if (dist < 1) dist = 1;
-    int32_t ix = ox + (vx * len) / dist;
-    int32_t iy = oy + (vy * len) / dist;
+    int32_t q = (len << 8) / dist;
+    int32_t ix = ox + ((vx * q + 128) >> 8);
+    int32_t iy = oy + ((vy * q + 128) >> 8);
 
     graphics_draw_line(ctx, GPoint(ix, iy), GPoint(ox, oy));
   }
@@ -447,26 +441,6 @@ static void prv_update_readouts(void) {
   if (steps > 0) snprintf(steps_buf, sizeof(steps_buf), "%d", (int)steps);
 #endif
   text_layer_set_text(s_steps_layer, steps_buf);
-
-  static char temp_buf[48];   // holds the longest condition string
-  temp_buf[0] = '\0';
-  if (settings.ShowWeather && s_weather_valid) {
-    int v = s_weather_temp_c;
-    char u = 'C';
-    if (settings.TemperatureUnit) { v = v * 9 / 5 + 32; u = 'F'; }
-    // Just the reading: the condition word does not fit this block.
-    snprintf(temp_buf, sizeof(temp_buf), "%d%c", v, u);
-  }
-  text_layer_set_text(s_temp_layer, temp_buf);
-
-  static char sun_buf[24];
-  sun_buf[0] = '\0';
-  if (s_sunrise_min >= 0 && s_sunset_min >= 0) {
-    snprintf(sun_buf, sizeof(sun_buf), "%d:%02d %d:%02d",
-             s_sunrise_min / 60, s_sunrise_min % 60,
-             s_sunset_min / 60, s_sunset_min % 60);
-  }
-  text_layer_set_text(s_sun_layer, sun_buf);
 }
 
 // --- time / date ---------------------------------------------------
@@ -548,7 +522,7 @@ static void main_window_load(Window *window) {
   s_root_layer = window_get_root_layer(window);
   s_bounds = layer_get_bounds(s_root_layer);
 
-  window_set_background_color(window, GColorBlack);
+  window_set_background_color(window, GColorWhite);
 
   // Background (bgv2.2.png, or bgv2.2~emery.png on Pebble Time 2)
   s_background_bitmap = gbitmap_create_with_resource(RESOURCE_ID_IMAGE_BACKGROUND_MGSV);
@@ -635,22 +609,6 @@ static void main_window_load(Window *window) {
   text_layer_set_text(s_steps_layer, "");
   layer_add_child(s_root_layer, text_layer_get_layer(s_steps_layer));
 
-  // Weather and sun times, in the band's free left block
-  s_temp_layer = text_layer_create(scaled_rect(LY_TEMP_X, LY_TEMP_Y, LY_TEMP_W, LY_TEMP_H));
-  text_layer_set_background_color(s_temp_layer, GColorClear);
-  text_layer_set_text_color(s_temp_layer, GColorBlack);
-  text_layer_set_font(s_temp_layer, s_letter_font);
-  text_layer_set_text_alignment(s_temp_layer, GTextAlignmentLeft);
-  text_layer_set_text(s_temp_layer, "");
-  layer_add_child(s_root_layer, text_layer_get_layer(s_temp_layer));
-
-  s_sun_layer = text_layer_create(scaled_rect(LY_SUN_X, LY_SUN_Y, LY_SUN_W, LY_SUN_H));
-  text_layer_set_background_color(s_sun_layer, GColorClear);
-  text_layer_set_text_color(s_sun_layer, GColorBlack);
-  text_layer_set_font(s_sun_layer, s_letter_font);
-  text_layer_set_text_alignment(s_sun_layer, GTextAlignmentLeft);
-  text_layer_set_text(s_sun_layer, "");
-  layer_add_child(s_root_layer, text_layer_get_layer(s_sun_layer));
 
   // Battery, on the printed yellow bar
   s_battery_layer = layer_create(scaled_rect(LY_BATT_X, LY_BATT_Y, LY_BATT_W, LY_BATT_H));
@@ -683,8 +641,6 @@ static void main_window_unload(Window *window) {
 
   layer_destroy(s_hands_layer);
   text_layer_destroy(s_steps_layer);
-  text_layer_destroy(s_temp_layer);
-  text_layer_destroy(s_sun_layer);
   layer_destroy(s_battery_layer);
   layer_destroy(s_marks_layer);
   bitmap_layer_destroy(s_background_layer);

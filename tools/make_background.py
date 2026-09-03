@@ -43,14 +43,21 @@ def scale_font(path, target_h, text="8"):
     return ImageFont.truetype(path, best)
 
 
-def draw_octagon(d, box, chamfer, fill, outline=None):
+def octagon_points(box, chamfer):
     x0, y0, x1, y1 = box
     c = chamfer
-    pts = [
+    return [
         (x0 + c, y0), (x1 - c, y0), (x1, y0 + c), (x1, y1 - c),
         (x1 - c, y1), (x0 + c, y1), (x0, y1 - c), (x0, y0 + c),
     ]
-    d.polygon(pts, fill=fill, outline=outline)
+
+
+def draw_octagon(d, box, chamfer, fill=None, outline=None, width=1):
+    pts = octagon_points(box, chamfer)
+    if fill is not None:
+        d.polygon(pts, fill=fill)
+    if outline is not None:
+        d.line(pts + [pts[0]], fill=outline, width=width, joint="curve")
 
 
 def draw_scale(d, box, chamfer, font, W):
@@ -107,14 +114,14 @@ def draw_scale(d, box, chamfer, font, W):
         n = max(1.0, (vx * vx + vy * vy) ** 0.5)
         ox, oy = px + vx / n * gap, py + vy / n * gap
         if i % 5:
-            d.rectangle([ox - dot, oy - dot, ox + dot, oy + dot], fill=WHITE)
+            d.rectangle([ox - dot, oy - dot, ox + dot, oy + dot], fill=BLACK)
         else:
             label = "60" if i == 0 else str(i)
             tb = font.getbbox(label)
             tw, th = tb[2] - tb[0], tb[3] - tb[1]
             lx, ly = px + vx / n * (gap + 2), py + vy / n * (gap + 2)
             d.text((lx - tw / 2 - tb[0], ly - th / 2 - tb[1]), label,
-                   font=font, fill=WHITE)
+                   font=font, fill=BLACK)
 
 
 def draw_emblem(d, cx, cy, r):
@@ -128,7 +135,10 @@ def draw_emblem(d, cx, cy, r):
 
 
 def build(W, H, path):
-    im = Image.new("RGB", (W, H), BLACK)
+    # The panel itself is the light surface: on the real watch everything dark
+    # is a printed mark or a lit segment on that surface, so the background
+    # starts white and the artwork is drawn onto it.
+    im = Image.new("RGB", (W, H), WHITE)
     d = ImageDraw.Draw(im)
 
     # --- proportions, taken from the reference photo -----------------------
@@ -140,19 +150,20 @@ def build(W, H, path):
     lcd = (scale_w, scale_h,
            W - rail_w - scale_w - 1, H - band_h - scale_h - 1)
     chamfer = max(4, W // 22)
+    rule = max(2, W // 70)                  # printed line weight
 
     label_font = scale_font(FONT_LABEL, max(5, H // 34), "CHA")
     scale_font_ = scale_font(FONT_LABEL, max(4, H // 40), "60")
 
-    # --- LCD window and its scale -----------------------------------------
-    draw_octagon(d, lcd, chamfer, WHITE)
+    # --- the time window: an outlined octagon, not a filled one ------------
+    draw_octagon(d, lcd, chamfer, outline=BLACK, width=rule)
     draw_scale(d, lcd, chamfer, scale_font_, W)
 
     cx, cy = (lcd[0] + lcd[2]) // 2, (lcd[1] + lcd[3]) // 2
     emblem_r = max(9, int((lcd[3] - lcd[1]) * 0.135))
     draw_emblem(d, cx, cy, emblem_r)
 
-    # --- right rail --------------------------------------------------------
+    # --- right rail: outlined boxes on the same surface --------------------
     rx0, rx1 = W - rail_w, W - 2
     top, bottom = lcd[1], lcd[3]
     n = len(RAIL)
@@ -161,22 +172,22 @@ def build(W, H, path):
     for i, name in enumerate(RAIL):
         by0 = top + i * slot
         by1 = by0 + slot - pad
-        d.rectangle([rx0, by0, rx1, by1], fill=WHITE)
+        d.rectangle([rx0, by0, rx1, by1], outline=BLACK, width=1)
         tb = label_font.getbbox(name)
-        d.text((rx0 + 2 - tb[0], (by0 + by1) / 2 - (tb[3] - tb[1]) / 2 - tb[1]),
+        d.text((rx0 + 3 - tb[0], (by0 + by1) / 2 - (tb[3] - tb[1]) / 2 - tb[1]),
                name, font=label_font, fill=BLACK)
 
-    # empty box (steps readout) then the battery bar
     box_y0 = top + n * slot
     box_y1 = box_y0 + slot - pad
-    d.rectangle([rx0, box_y0, rx1, box_y1], fill=WHITE)
+    d.rectangle([rx0, box_y0, rx1, box_y1], outline=BLACK, width=1)
     bar_y0 = box_y1 + pad + 1
     bar_y1 = min(bottom, bar_y0 + max(3, slot // 3))
-    d.rectangle([rx0, bar_y0, rx1, bar_y1], fill=AMBER)
+    d.rectangle([rx0, bar_y0, rx1, bar_y1], fill=AMBER, outline=BLACK, width=1)
 
-    # --- lower band --------------------------------------------------------
+    # --- lower band ---------------------------------------------------------
+    # Continuous with the panel on the real watch; only a rule separates it.
     band_top = lcd[3] + scale_h + 2
-    draw_octagon(d, (1, band_top, W - 2, H - 2), chamfer, WHITE)
+    d.line([(2, band_top), (W - 3, band_top)], fill=BLACK, width=rule)
 
     # PIL antialiases text and polygon edges, which on a 64-colour screen
     # shows up as muddy fringes and on 1-bit aplite as dithering. Snap every
@@ -186,16 +197,16 @@ def build(W, H, path):
     for y in range(H):
         for x in range(W):
             r, g, b = px[x, y]
-            px[x, y] = min(palette, key=lambda c: (c[0]-r)**2 + (c[1]-g)**2 + (c[2]-b)**2)
+            px[x, y] = min(palette,
+                           key=lambda c: (c[0]-r)**2 + (c[1]-g)**2 + (c[2]-b)**2)
 
     im.save(path)
-    geom = {
+    return {
         "lcd": lcd, "chamfer": chamfer, "rail": (rx0, rx1),
         "rail_slot": slot, "rail_top": top,
         "box": (box_y0, box_y1), "bar": (bar_y0, bar_y1),
         "band_top": band_top, "emblem": (cx, cy), "emblem_r": emblem_r,
     }
-    return geom
 
 
 def emit_defines(g, W, H):
