@@ -67,15 +67,25 @@
 // day-of-week stacked above day-of-month on the right ("DEC" / "MO" / "6").
 // The white area starts higher on the right (y 116 from x 107, vs y 122
 // across the full width), which is what makes room for the stack.
+//
+// Measured on the reference: DEC and 6 share a baseline, and MO sits directly
+// on top of 6 with no gap. All three are 7-segment. Both right-hand boxes end
+// at the same x and use the same font, so their right edges line up; the
+// boxes overlap vertically but the glyphs do not, because a TextLayer
+// reserves the font's empty ascender above the ink.
+//
+// Both boxes end at x 138. The rendered right edges still differ by ~2px
+// because digital-7 is italic and the "3" leans further out than the "H" -
+// a glyph metric, not a layout error; narrowing the box does not move it.
 #define LY_DOW_X       104
 #define LY_DOW_Y       112
 #define LY_DOW_W       34
-#define LY_DOW_H       16
+#define LY_DOW_H       26
 
 #define LY_DOM_X       98
-#define LY_DOM_Y       125
+#define LY_DOM_Y       131
 #define LY_DOM_W       40
-#define LY_DOM_H       30
+#define LY_DOM_H       26
 
 // The box starts above the emblem on purpose: a TextLayer reserves the font's
 // empty ascender at the top, so the glyphs land ~8px lower than the box does.
@@ -88,7 +98,7 @@
 #define LY_DATE_X      6
 #define LY_DATE_Y      122
 #define LY_DATE_W      86
-#define LY_DATE_H      31
+#define LY_DATE_H      36
 
 #define LY_WEATHER_X   6
 #define LY_WEATHER_Y   1
@@ -507,7 +517,7 @@ static void main_window_load(Window *window) {
   s_weekday_text_layer = text_layer_create(scaled_rect(LY_DOW_X, LY_DOW_Y, LY_DOW_W, LY_DOW_H));
   text_layer_set_background_color(s_weekday_text_layer, GColorClear);
   text_layer_set_text_color(s_weekday_text_layer, GColorBlack);
-  text_layer_set_font(s_weekday_text_layer, s_letter_font);
+  text_layer_set_font(s_weekday_text_layer, s_time_mid_font);
   text_layer_set_text_alignment(s_weekday_text_layer, GTextAlignmentRight);
   text_layer_set_text(s_weekday_text_layer, "MO");
 
